@@ -20,3 +20,6 @@ Thumbs.db
 
 # 本地调试脚本
 _*.py
+
+# PyInstaller 生成的 spec
+*.spec

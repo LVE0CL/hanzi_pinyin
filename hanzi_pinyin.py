@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-汉字拼音浮窗 · Hanzi Pinyin Popup  v1.1.0
+汉字拼音浮窗 · Hanzi Pinyin Popup  v1.2.0
 =========================================
 
 一个常驻托盘的小浮窗：在任何地方写/打出汉字，立刻看到拼音（多音字全列）、
@@ -19,6 +19,17 @@ v1.1.0 迭代：
     · US7 迷你浮窗贴光标定位、可拖动 / 固定 / 超时淡出
     · US8 朗读嗓音可选、点单字朗读、抓取选区不破坏剪贴板
     · US9 标调方式切换（符号 / 数字 / 无声调）、多音字点击切换
+
+v1.2.0 迭代：
+    · US10 设置图标统一为齿轮（首页自绘位图 + 托盘菜单齿轮字符）
+    · US11 首次启动引导页 + 15 个可选模块的开关框架
+    · US12 内置手写板（米字格画布）+ 系统手写识别接入
+    · US13 5 套 VS Code 风主题（默认 Dark+）+ 可选背景色覆盖，切换即重绘
+    · US14 置顶改为可选：标题栏「📌 | − | □ | ×」中的图钉切换
+    · US15 快捷键重构：允许留空禁用、移除抓取热键、选中双击支持键盘功能键、
+           与唤起键冲突时弹「是否互换」确认框
+    · US17 迷你浮窗点击外部自动关闭（可配置，pin 后不生效）
+    · FR1  过滤非中文/非标点字符（"Hello 你好 123！" → 只注音「你好！」）
 
 许可证：MIT
 """
@@ -51,6 +62,7 @@ except ImportError:  # pragma: no cover
 try:
     import tkinter as tk
     from tkinter import font as tkfont
+    from tkinter import messagebox
 except ImportError:  # pragma: no cover
     sys.exit(
         "当前 Python 没有 tkinter，请安装带 tkinter 的官方 Python：\n"
@@ -74,10 +86,52 @@ HANZI_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
 # --------------------------------------------------------------------------
 APP_NAME = "HanziPinyinPopup"
 APP_TITLE = "汉字拼音浮窗"
-VERSION = "1.1.0"
-CONFIG_SCHEMA = 3
+VERSION = "1.2.0"
+CONFIG_SCHEMA = 4
 SINGLE_INSTANCE_PORT = 47653
 PROJECT_URL = "https://github.com/LVE0CL/hanzi_pinyin"
+
+# --------------------------------------------------------------------------
+# 第 2 批可选功能模块（US11）：开关框架本期就位，内部功能后续迭代逐个落地
+# --------------------------------------------------------------------------
+MODULES = [
+    {"key": "stroke_animation", "label": "笔画顺序动画",
+     "hint": "按笔顺逐笔回放单字写法"},
+    {"key": "stroke_practice_sheet", "label": "字帖生成",
+     "hint": "导出米字格字帖 PDF / 图片"},
+    {"key": "srs_review", "label": "生词本 + SRS 复习",
+     "hint": "按间隔重复算法安排复习"},
+    {"key": "spelling_quiz", "label": "拼写自测 / 听写",
+     "hint": "听读音写拼音或写汉字"},
+    {"key": "tone_contour", "label": "声调五度图",
+     "hint": "画出调值曲线，直观看出高低升降"},
+    {"key": "custom_pronunciation", "label": "自定义读音词库",
+     "hint": "给多音字 / 人名地名词条指定读法"},
+    {"key": "translate_on_select", "label": "划词翻译",
+     "hint": "选中文字时附带常见义项"},
+    {"key": "hsk_frequency", "label": "HSK 等级 + 字频",
+     "hint": "标注 HSK 级别与使用频率"},
+    {"key": "ruby_export", "label": "Ruby 注音导出",
+     "hint": "导出带注音的 HTML / Word"},
+    {"key": "pinyin_reverse_lookup", "label": "拼音反向查字",
+     "hint": "输入 han4 反查候选汉字"},
+    {"key": "bopomofo", "label": "注音符号（ㄅㄆㄇ）",
+     "hint": "台湾惯用的注音显示方式"},
+    {"key": "variant_chars", "label": "繁简 / 异体对照",
+     "hint": "同时给出繁体与异体写法"},
+    {"key": "learning_stats", "label": "学习统计面板",
+     "hint": "查询次数、生词增长、复习完成度"},
+    {"key": "cloud_sync", "label": "云同步生词本",
+     "hint": "多设备同步（需自备存储）"},
+    {"key": "handwriting", "label": "手写功能（US12）",
+     "hint": "内置手写板 + 系统手写识别", "default": True},
+]
+
+MODULE_KEYS = [m["key"] for m in MODULES]
+
+
+def default_modules() -> dict:
+    return {m["key"]: bool(m.get("default", False)) for m in MODULES}
 
 # --------------------------------------------------------------------------
 # 配置模型
@@ -86,20 +140,23 @@ DEFAULT_CONFIG = {
     "schemaVersion": CONFIG_SCHEMA,
     # 通用
     "start_hidden": False,        # 启动时只驻留托盘
-    "always_on_top": True,        # 窗口置顶
+    "always_on_top": True,        # 窗口置顶（US14：可由标题栏图钉切换）
     "language": "zh-CN",          # 预留：界面语言
     "resize_enabled": True,       # 允许从边缘拖动改大小
     "resize_pad": 6,              # 边缘热区厚度(px)
     "min_width": 320,
     "min_height": 200,
-    # 快捷键
+    "theme": "dark_plus",         # US13：dark_plus/light_plus/dark_blue/light_blue/monokai
+    "theme_background": None,     # US13：自定义背景色，null = 跟随配色
+    # 快捷键（US15：空字符串 = 禁用）
     "trigger_key": "ctrl",        # 双击唤起的按键
     "double_click_ms": 400,       # 双击判定间隔
-    "hotkey": "<ctrl>+<alt>+p",   # 抓取选中文字 / 唤出
     "quit_hotkey": "<ctrl>+<alt>+q",
     "select_double_popup": True,  # 选中文字后双击弹迷你浮窗
-    "select_double_button": "left",   # left / right / middle
+    "select_double_mode": "mouse",     # mouse / key
+    "select_double_button": "left",    # left / right / middle
     "select_double_modifier": "none",  # none / ctrl / alt / shift
+    "select_double_key": "shift",      # 键盘模式下双击的按键，须 ≠ trigger_key
     "trigger_prefers_selection": False,  # 双击触发键时有选区则弹迷你窗而非首页
     # 功能模块
     "auto_clipboard": False,      # 剪贴板出现汉字时自动显示
@@ -109,9 +166,13 @@ DEFAULT_CONFIG = {
     "read_char_on_click": True,   # 点单字朗读
     "preserve_clipboard": True,   # 抓取选区不破坏剪贴板
     "tone_style": "symbol",       # symbol / num / none
-    "theme": "dark",              # dark / light（切换后需重启）
+    "filter_non_han": True,       # FR1：过滤非中文/非标点字符
+    "popup_dismiss_on_outside_click": True,   # US17：点浮窗外自动关闭
     "mini_popup_auto_hide_ms": 4000,   # 0 = 不自动消失
     "mini_popup_pinned": False,
+    "handwriting_engine": "system",    # US12：system / offline
+    "modules": default_modules(),      # US11：15 个可选模块开关
+    "first_run": True,                 # US11：首次启动引导
     # 运行时状态（不算「设置」，但一起持久化）
     "window_width": 420,
     "window_height": 200,
@@ -135,7 +196,26 @@ SETTING_GROUPS = [
                 "key": "always_on_top",
                 "label": "窗口置顶",
                 "type": "bool",
-                "hint": "浮窗始终显示在其他窗口之上",
+                "hint": "浮窗始终显示在其他窗口之上（也可点标题栏左侧图钉快速切换）",
+            },
+            {
+                "key": "theme",
+                "label": "主题",
+                "type": "choice",
+                "choices": [
+                    ("Dark+", "dark_plus"),
+                    ("Light+", "light_plus"),
+                    ("Dark Blue", "dark_blue"),
+                    ("Light Blue", "light_blue"),
+                    ("Monokai", "monokai"),
+                ],
+                "hint": "VS Code 风配色，保存后立即重绘，不需要重启",
+            },
+            {
+                "key": "theme_background",
+                "label": "背景色",
+                "type": "color",
+                "hint": "可选，留空则跟随主题；只改主背景，其余颜色按明暗自适应",
             },
             {
                 "key": "language",
@@ -190,8 +270,9 @@ SETTING_GROUPS = [
                     ("F1", "f1"),
                     ("F2", "f2"),
                     ("F3", "f3"),
+                    ("不使用（禁用）", ""),
                 ],
-                "hint": "连续按两下该键即可唤起首页（现阶段只支持单键）",
+                "hint": "连续按两下该键即可唤起首页；选「不使用」则不注册全局监听",
             },
             {
                 "key": "double_click_ms",
@@ -204,21 +285,33 @@ SETTING_GROUPS = [
                 "hint": "两次按键间隔小于该值才算双击，400 ms 为跨平台折中值",
             },
             {
-                "key": "hotkey",
-                "label": "抓取选中文字",
-                "type": "choice",
-                "choices": [
-                    ("Ctrl + Alt + P", "<ctrl>+<alt>+p"),
-                    ("Ctrl + Shift + P", "<ctrl>+<shift>+p"),
-                    ("Alt + Shift + P", "<alt>+<shift>+p"),
-                ],
-                "hint": "选中文字后按此组合键，浮窗会读取选区并显示拼音",
-            },
-            {
                 "key": "select_double_popup",
                 "label": "选中双击弹浮窗",
                 "type": "bool",
-                "hint": "选中文字后双击鼠标，在光标旁弹出迷你浮窗（需 uiautomation 才能读到选区）",
+                "hint": "选中文字后双击，在光标旁弹出迷你浮窗（需 uiautomation 才能读到选区）",
+            },
+            {
+                "key": "select_double_mode",
+                "label": "选中双击模式",
+                "type": "choice",
+                "choices": [("鼠标", "mouse"), ("键盘", "key")],
+                "hint": "键盘模式适合触控板 / 只想敲键的场景：连续按两下下方功能键",
+            },
+            {
+                "key": "select_double_key",
+                "label": "选中双击的键盘功能键",
+                "type": "choice",
+                "choices": [
+                    ("Shift", "shift"),
+                    ("Ctrl", "ctrl"),
+                    ("Alt", "alt"),
+                    ("空格", "space"),
+                    ("Tab", "tab"),
+                    ("F4", "f4"),
+                    ("F5", "f5"),
+                    ("不使用（禁用）", ""),
+                ],
+                "hint": "必须与「双击唤起键」不同；若相同，保存时会询问是否互换",
             },
             {
                 "key": "select_double_button",
@@ -233,6 +326,18 @@ SETTING_GROUPS = [
                 "type": "choice",
                 "choices": [("不需要", "none"), ("按住 Ctrl", "ctrl"), ("按住 Alt", "alt"), ("按住 Shift", "shift")],
                 "hint": "若与其它软件的双击手势冲突，可加一个修饰键区分",
+            },
+            {
+                "key": "quit_hotkey",
+                "label": "退出热键",
+                "type": "choice",
+                "choices": [
+                    ("Ctrl + Alt + Q", "<ctrl>+<alt>+q"),
+                    ("Ctrl + Shift + Q", "<ctrl>+<shift>+q"),
+                    ("Alt + Shift + Q", "<alt>+<shift>+q"),
+                    ("不使用（禁用）", ""),
+                ],
+                "hint": "任何时候按下都能退出程序；选「不使用」则只能用托盘的退出",
             },
             {
                 "key": "trigger_prefers_selection",
@@ -315,11 +420,23 @@ SETTING_GROUPS = [
                 "hint": "勾选后迷你浮窗默认固定，不会自动淡出",
             },
             {
-                "key": "theme",
-                "label": "界面主题",
+                "key": "filter_non_han",
+                "label": "过滤非中文/非标点",
+                "type": "bool",
+                "hint": "只把中文与标点送进注音，英文、数字、符号、emoji 一律过滤（推荐开启）",
+            },
+            {
+                "key": "popup_dismiss_on_outside_click",
+                "label": "点浮窗外自动关闭",
+                "type": "bool",
+                "hint": "在迷你浮窗以外的地方点一下鼠标就收起（已固定的浮窗不受影响）",
+            },
+            {
+                "key": "handwriting_engine",
+                "label": "手写识别引擎",
                 "type": "choice",
-                "choices": [("深色", "dark"), ("浅色", "light")],
-                "hint": "切换后需重启程序生效",
+                "choices": [("系统手写（微软同款）", "system"), ("离线模型（ONNX）", "offline")],
+                "hint": "系统引擎调用 Windows 自带手写识别；离线模型需自行放置 models/handwriting.onnx",
             },
         ],
     },
@@ -355,32 +472,105 @@ def convert_reading(reading: str, style: str) -> str:
     except Exception:
         return reading
 
+# --------------------------------------------------------------------------
+# US13：主题配色表（集中在这一处，切换即重绘，界面里不硬编码颜色）
+# 每套都给齐同样的 key，改配色只改这里。accent_fg = 强调色上的文字色。
+# --------------------------------------------------------------------------
+THEME_COLOR_KEYS = ("panel", "panel_alt", "border", "fg", "fg_dim", "accent",
+                    "accent_fg", "hover", "entry_bg", "danger", "scroll")
+
 THEMES = {
-    "dark": {
-        "panel": "#1e2126",
-        "panel_alt": "#262a31",
-        "border": "#3a4048",
-        "fg": "#e8eaed",
-        "fg_dim": "#8b939e",
-        "accent": "#7fd1a0",
-        "hover": "#2f353d",
-        "entry_bg": "#171a1e",
-        "danger": "#e07070",
-        "scroll": "#4a515b",
+    "dark_plus": {          # VS Code Dark+
+        "panel": "#1e1e1e", "panel_alt": "#252526", "border": "#3c3c3c",
+        "fg": "#d4d4d4", "fg_dim": "#8f8f8f", "accent": "#4ec9b0",
+        "accent_fg": "#0f1f1b", "hover": "#2a2d2e", "entry_bg": "#181818",
+        "danger": "#f48771", "scroll": "#4a4a4a", "dark": True,
     },
-    "light": {
-        "panel": "#ffffff",
-        "panel_alt": "#f4f5f7",
-        "border": "#d8dbe1",
-        "fg": "#1f2328",
-        "fg_dim": "#767e89",
-        "accent": "#0a7d4f",
-        "hover": "#e9ecf1",
-        "entry_bg": "#f7f8fa",
-        "danger": "#c0392b",
-        "scroll": "#c7ccd4",
+    "light_plus": {         # VS Code Light+
+        "panel": "#ffffff", "panel_alt": "#f3f3f3", "border": "#e0e0e0",
+        "fg": "#1f1f1f", "fg_dim": "#6f6f6f", "accent": "#007acc",
+        "accent_fg": "#ffffff", "hover": "#e8e8e8", "entry_bg": "#fbfbfb",
+        "danger": "#cd3131", "scroll": "#c8c8c8", "dark": False,
+    },
+    "dark_blue": {          # Visual Studio Dark Blue
+        "panel": "#12212f", "panel_alt": "#1a2c3d", "border": "#2a4256",
+        "fg": "#dbe7f3", "fg_dim": "#7f97ad", "accent": "#4fa3d1",
+        "accent_fg": "#07131d", "hover": "#1e3548", "entry_bg": "#0d1926",
+        "danger": "#e26d6d", "scroll": "#3a5568", "dark": True,
+    },
+    "light_blue": {         # Visual Studio Light Blue
+        "panel": "#f5f9ff", "panel_alt": "#e8f1fb", "border": "#cfe0f0",
+        "fg": "#1b2b3a", "fg_dim": "#6b8299", "accent": "#1f7ac0",
+        "accent_fg": "#ffffff", "hover": "#dceaf8", "entry_bg": "#ffffff",
+        "danger": "#c0392b", "scroll": "#c3d6e8", "dark": False,
+    },
+    "monokai": {            # Monokai
+        "panel": "#272822", "panel_alt": "#2f3029", "border": "#49483e",
+        "fg": "#f8f8f2", "fg_dim": "#a6a68a", "accent": "#a6e22e",
+        "accent_fg": "#1a1f12", "hover": "#3a3b32", "entry_bg": "#1f201b",
+        "danger": "#f92672", "scroll": "#575744", "dark": True,
     },
 }
+
+# 老配置里的 dark / light 直接映射到对应的新预设
+THEME_ALIASES = {"dark": "dark_plus", "light": "light_plus"}
+
+
+def _hex_to_rgb(value: str):
+    value = (value or "").strip().lstrip("#")
+    if len(value) == 3:
+        value = "".join(ch * 2 for ch in value)
+    if len(value) != 6:
+        return None
+    try:
+        return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return None
+
+
+def _rgb_to_hex(rgb) -> str:
+    return "#%02x%02x%02x" % tuple(max(0, min(255, int(v))) for v in rgb)
+
+
+def _mix(color_a: str, color_b: str, ratio: float) -> str:
+    """按 ratio 把 a 混向 b（0 = 全 a，1 = 全 b）。"""
+    ra, rb = _hex_to_rgb(color_a), _hex_to_rgb(color_b)
+    if ra is None or rb is None:
+        return color_a
+    ratio = max(0.0, min(1.0, ratio))
+    return _rgb_to_hex(tuple(a + (b - a) * ratio for a, b in zip(ra, rb)))
+
+
+def normalize_theme(name: str) -> str:
+    name = THEME_ALIASES.get(name or "", name or "")
+    return name if name in THEMES else "dark_plus"
+
+
+def theme_colors(name: str, background=None) -> dict:
+    """取一套配色；给了 background 就只覆盖主背景，其余颜色按明暗自适应。"""
+    base = dict(THEMES[normalize_theme(name)])
+    rgb = _hex_to_rgb(background) if isinstance(background, str) else None
+    if rgb is not None:
+        lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255.0
+        dark = lum < 0.5
+        base["panel"] = _rgb_to_hex(rgb)
+        base["panel_alt"] = _mix(base["panel"], "#ffffff" if dark else "#000000",
+                                 0.08 if dark else 0.05)
+        base["hover"] = _mix(base["panel"], "#ffffff" if dark else "#000000",
+                             0.16 if dark else 0.09)
+        base["entry_bg"] = _mix(base["panel"], "#000000" if dark else "#ffffff",
+                                0.22 if dark else 0.45)
+        base["border"] = _mix(base["panel"], "#ffffff" if dark else "#000000",
+                              0.26 if dark else 0.14)
+        base["dark"] = dark
+        if dark:
+            base["fg"] = "#e8e8e8"
+            base["fg_dim"] = "#9a9a9a"
+        else:
+            base["fg"] = "#1f2328"
+            base["fg_dim"] = "#6f6f6f"
+    return base
+
 
 
 # --------------------------------------------------------------------------
@@ -401,6 +591,8 @@ def config_path() -> str:
 def migrate(cfg: dict) -> dict:
     """把旧版本配置升级到当前 schema。新增字段一律走这里补齐。"""
     version = int(cfg.get("schemaVersion", 1) or 1)
+    # US15：「抓取选中文字」热键已被「选中双击弹浮窗」取代，旧字段一律清掉
+    cfg.pop("hotkey", None)
     if version < 2:
         # v1 → v2：新增托盘 / 双击唤起相关字段，旧字段名保持不变
         cfg.setdefault("start_hidden", DEFAULT_CONFIG["start_hidden"])
@@ -420,6 +612,25 @@ def migrate(cfg: dict) -> dict:
         if not isinstance(cfg.get("window_height"), int):
             cfg["window_height"] = DEFAULT_CONFIG["window_height"]
         version = 3
+    if version < 4:
+        # v3 → v4：主题 5 套 + 背景覆盖、快捷键空值/键盘模式、模块开关、首启引导、
+        #           手写引擎、非汉字过滤、点浮窗外关闭
+        for key in (
+            "theme_background", "select_double_mode", "select_double_key",
+            "filter_non_han", "popup_dismiss_on_outside_click",
+            "handwriting_engine", "first_run",
+        ):
+            cfg.setdefault(key, DEFAULT_CONFIG[key])
+        version = 4
+    # 主题名（dark/light → dark_plus/light_plus）与模块表每轮都对齐一次，幂等
+    cfg["theme"] = normalize_theme(cfg.get("theme"))
+    modules = default_modules()
+    stored = cfg.get("modules")
+    if isinstance(stored, dict):
+        for key, value in stored.items():
+            if key in modules:
+                modules[key] = bool(value)
+    cfg["modules"] = modules
     cfg["schemaVersion"] = version
     return cfg
 
@@ -519,6 +730,27 @@ def make_gear_image(size: int = 18, color: str = "#8b939e"):
     return img.resize((size, size), Image.LANCZOS)
 
 
+def make_pin_image(size: int = 16, color: str = "#8f8f8f", filled: bool = False):
+    """US14：图钉图标。filled=True 表示「已钉住」（实心高亮），否则描边。"""
+    scale = 4
+    s = size * scale
+    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    width = max(2, int(s * 0.10))
+    head = [s * 0.28, s * 0.12, s * 0.72, s * 0.44]        # 钉帽（椭圆）
+    body = [(s * 0.32, s * 0.40), (s * 0.68, s * 0.40), (s * 0.60, s * 0.60),
+            (s * 0.40, s * 0.60)]
+    if filled:
+        d.ellipse(head, fill=color)
+        d.polygon(body, fill=color)
+        d.line([s * 0.5, s * 0.58, s * 0.5, s * 0.90], fill=color, width=width)
+    else:
+        d.ellipse(head, outline=color, width=width)
+        d.line(body + [body[0]], fill=color, width=width, joint="curve")
+        d.line([s * 0.5, s * 0.58, s * 0.5, s * 0.90], fill=color, width=width)
+    return img.resize((size, size), Image.LANCZOS)
+
+
 def make_caret_image(size: int = 9, color: str = "#8b939e"):
     """下拉箭头：向下的小三角。Tk 自带箭头在深色主题下会变成空白方块，故自绘。"""
     scale = 4
@@ -558,13 +790,35 @@ def common_pairs() -> set:
     return _COMMON_PAIRS
 
 
-def analyze(text: str, tone_style: str = "symbol") -> list:
+# FR1：只放行「中文 + 标点」，其余字符（英文、数字、符号、emoji、空白）过滤掉
+ALLOWED_PUNCT = set(
+    "，。！？；：、（）《》〈〉「」『』【】〔〕—－…～·"
+    ",.!?;:()[]{}<>'\"-+*/=%&@#|^`$"
+)
+
+
+def filter_text(text: str, enabled: bool = True) -> str:
+    """FR1 缺陷修复：把非中文/非标点的字符滤掉。
+
+    "Hello 你好 123！" → "你好！"：标点原样保留、不参与注音，英文数字不报错不串行。
+    enabled=False 时原样返回（此时英文数字仍只是展示，不注音）。
+    """
+    if not enabled or not text:
+        return text
+    return "".join(
+        ch for ch in text if HANZI_RE.match(ch) or ch in ALLOWED_PUNCT
+    ).strip()
+
+
+def analyze(text: str, tone_style: str = "symbol", filter_non_han: bool = True) -> list:
     """把一段文字拆成 [{char, readings}]，非汉字（连续的一段）合并为一项。
 
     readings[0] 是**结合上下文**得到的主读音（"重庆"的"重"读 chóng），
     后面跟的是该字的其他常见读音（多音字）。
     tone_style 只影响输出的写法（hàn / han4 / han），消歧与过滤始终按带调进行。
+    filter_non_han=True 时先做 FR1 过滤，英文/数字/emoji 不参与注音也不显示。
     """
+    text = filter_text(text, filter_non_han)
     chars = [ch for ch in text if ch not in "\r\n\t"]
     if not chars:
         return []
@@ -1043,7 +1297,9 @@ class TriggerKeyListener:
     ]
 
     def __init__(self, key: str, interval_ms: int, callback):
-        self.key = key if key in self.SUPPORTED else "ctrl"
+        # US15：空字符串 = 用户主动禁用，不做任何监听
+        self.disabled = not key or key not in self.SUPPORTED
+        self.key = key if key in self.SUPPORTED else ""
         self.interval = max(0.15, min(1.0, int(interval_ms) / 1000.0))
         self.callback = callback
         self._last = 0.0
@@ -1069,6 +1325,8 @@ class TriggerKeyListener:
             return ""
 
     def start(self) -> bool:
+        if self.disabled:
+            return False
         try:
             from pynput import keyboard
         except Exception:
@@ -1215,7 +1473,7 @@ class MouseDoubleClickListener:
 # --------------------------------------------------------------------------
 # 主窗口
 # --------------------------------------------------------------------------
-PLACEHOLDER = "在这里写字，或按 Ctrl+Alt+P 抓取选区"
+PLACEHOLDER = "在这里写字，或者选中一段文字后双击"
 
 
 # --------------------------------------------------------------------------
@@ -1307,10 +1565,12 @@ class RubyView:
                 if it["readings"]:
                     shown = self.shown_reading(idx)
                     py = tk.Label(cell, text=shown, bg=c["panel"], fg=c["accent"],
-                                  font=self.app.font_pinyin)
+                                  font=self.app.font_pinyin, bd=0,
+                                  highlightthickness=0, padx=0, pady=0)
                     py.place(relx=0.5, y=1, anchor="n")
                     ch = tk.Label(cell, text=it["char"], bg=c["panel"], fg=c["fg"],
-                                  font=self.app.font_char)
+                                  font=self.app.font_char, bd=0,
+                                  highlightthickness=0, padx=0, pady=0)
                     ch.place(relx=0.5, rely=1.0, y=-1, anchor="s")
                     widgets = (cell, py, ch)
                 else:
@@ -1342,6 +1602,8 @@ class MiniPopup:
         self._hide_job = None
         self._fade_job = None
         self._dead = False
+        self._outside = None          # US17：点浮窗外关闭的鼠标监听
+        self._born = time.monotonic()
 
         c = self.colors
         self.win = tk.Toplevel(app.root)
@@ -1376,7 +1638,8 @@ class MiniPopup:
         self.view = RubyView(self.outer, app, lambda: self._width)
         self.view.frame.pack(fill="both", expand=True, padx=8, pady=(6, 8))
 
-        items = analyze(text, app.cfg.get("tone_style", "symbol"))
+        items = analyze(text, app.cfg.get("tone_style", "symbol"),
+                        bool(app.cfg.get("filter_non_han", True)))
         need = sum(self.view.item_width(it) for it in items) + 40
         self._width = int(max(200, min(560, need)))
         self.view.set_items(items)
@@ -1410,6 +1673,55 @@ class MiniPopup:
 
         self._fade_in()
         self._schedule_hide()
+        self._start_outside_watch()
+
+    # ---- US17：点浮窗外自动关闭 ----
+    def _start_outside_watch(self) -> None:
+        if not self.app.cfg.get("popup_dismiss_on_outside_click", True):
+            return
+        try:
+            from pynput import mouse
+        except Exception:
+            return
+
+        def on_click(x, y, _button, pressed):
+            if not pressed:
+                return
+            # 判定放到 Tk 线程里做（winfo_* 不能跨线程读）
+            self.app.post(self._maybe_close_outside, int(x), int(y))
+
+        try:
+            self._outside = mouse.Listener(on_click=on_click)
+            self._outside.daemon = True
+            self._outside.start()
+        except Exception as exc:
+            print(f"[warn] 浮窗外部点击监听启动失败：{exc}", file=sys.stderr)
+            self._outside = None
+
+    def _maybe_close_outside(self, x: int, y: int) -> None:
+        if self._dead or self.pinned:
+            return
+        # 打开浮窗的那一次双击还在路上，给它一点缓冲
+        if time.monotonic() - self._born < 0.35:
+            return
+        if not self.app.cfg.get("popup_dismiss_on_outside_click", True):
+            return
+        try:
+            wx, wy = self.win.winfo_rootx(), self.win.winfo_rooty()
+            ww, wh = self.win.winfo_width(), self.win.winfo_height()
+        except Exception:
+            return
+        if wx <= x < wx + ww and wy <= y < wy + wh:
+            return
+        self.close()
+
+    def _stop_outside_watch(self) -> None:
+        if self._outside is not None:
+            try:
+                self._outside.stop()
+            except Exception:
+                pass
+            self._outside = None
 
     # ---- 小工具 ----
     def _pin_label(self) -> str:
@@ -1538,6 +1850,7 @@ class MiniPopup:
         if self._dead:
             return
         self._dead = True
+        self._stop_outside_watch()
         self._cancel_hide()
         if self._fade_job is not None:
             try:
@@ -1556,7 +1869,8 @@ class MiniPopup:
 class HanziPopup:
     def __init__(self, cfg: dict):
         self.cfg = cfg
-        self.colors = THEMES.get(cfg.get("theme", "dark"), THEMES["dark"])
+        self.theme = normalize_theme(cfg.get("theme"))
+        self.colors = theme_colors(self.theme, cfg.get("theme_background"))
         self.font_size = int(cfg.get("font_size", 32))
         self.width = int(cfg.get("window_width", 420))
         self.height = int(cfg.get("window_height", 220))
@@ -1575,6 +1889,8 @@ class HanziPopup:
         self._hotkeys = None
         self._mouse = None
         self._mini = None
+        self._pad = None              # US12：手写板窗口
+        self._guide = None            # US11：首启引导页
         self._image_refs = []
         self._ui_queue = queue.Queue()
         self._poll_job = None
@@ -1607,7 +1923,7 @@ class HanziPopup:
         self.tray_ok = self._start_tray()
         self._start_trigger()
         self._start_hotkeys()
-        self._start_mouse_double()
+        self._start_select_double()
         if cfg.get("auto_clipboard"):
             self._start_clipboard_watch()
 
@@ -1617,6 +1933,10 @@ class HanziPopup:
         else:
             self.refresh()
             self.root.deiconify()
+
+        # US11：首次启动弹一次引导页
+        if cfg.get("first_run", True):
+            self.root.after(120, self.open_first_run)
 
     # ---------------- 图标 / 字体 ----------------
     def _set_window_icon(self) -> None:
@@ -1685,6 +2005,9 @@ class HanziPopup:
         self.btn_max.pack(side="right", padx=2)
         self.btn_min = self._title_button(self.bar, "−", self.hide_to_tray, big=True)
         self.btn_min.pack(side="right", padx=2)
+        # US14：图钉紧挨在「−」左侧，点击切换始终置顶
+        self.btn_pin = self._pin_button(self.bar)
+        self.btn_pin.pack(side="right", padx=(2, 4))
 
         self.btn_copy = self._title_button(self.bar, "复制", self.copy_pinyin)
         self.btn_copy.pack(side="right", padx=(2, 10))
@@ -1756,9 +2079,22 @@ class HanziPopup:
         self.btn_settings = self._gear_button(bottom)
         self.btn_settings.pack(side="right", padx=(6, 2))
 
+        # US12：手写入口只在模块开启时出现
+        self.btn_hand = None
+        if self.module_enabled("handwriting"):
+            self.btn_hand = tk.Label(
+                bottom, text="手写", bg=c["panel"], fg=c["fg_dim"],
+                font=self.font_hint, padx=6, cursor="hand2",
+            )
+            self.btn_hand.pack(side="right", padx=(6, 2))
+            self.btn_hand.bind("<Button-1>", lambda _e: self.open_handwriting())
+            self.btn_hand.bind("<Enter>", lambda _e: self.btn_hand.configure(fg=c["accent"]))
+            self.btn_hand.bind("<Leave>", lambda _e: self.btn_hand.configure(fg=c["fg_dim"]))
+
         # ---- 右键菜单 ----
         self.menu = tk.Menu(self.root, tearoff=0)
-        self.menu.add_command(label="设置…", command=self.open_settings)
+        self.menu.add_command(label="⚙ 设置…", command=self.open_settings)
+        self.menu.add_command(label="手写板…", command=self.open_handwriting)
         self.menu.add_command(label="复制「字 + 拼音」", command=self.copy_pairs)
         self.menu.add_command(label="朗读", command=self.speak_current)
         self.menu.add_separator()
@@ -1884,8 +2220,11 @@ class HanziPopup:
         self.refresh()
 
     def _hint_text(self) -> str:
-        key = TRIGGER_LABELS.get(self.cfg.get("trigger_key", "ctrl"), "Ctrl")
-        return f"双击 {key} 唤起 · Esc 隐藏 · Ctrl+Enter 朗读"
+        key = self.cfg.get("trigger_key", "ctrl")
+        if not key:
+            return "选中文字双击弹浮窗 · Esc 隐藏 · Ctrl+Enter 朗读"
+        label = TRIGGER_LABELS.get(key, "Ctrl")
+        return f"双击 {label} 唤起 · Esc 隐藏 · Ctrl+Enter 朗读"
 
     def _title_button(self, master, text, cmd, danger=False, big=False) -> tk.Label:
         c = self.colors
@@ -1897,6 +2236,49 @@ class HanziPopup:
         lbl.bind("<Enter>", lambda _e: lbl.configure(bg=c["hover"], fg=hover_fg))
         lbl.bind("<Leave>", lambda _e: lbl.configure(bg=c["panel"], fg=c["fg_dim"]))
         return lbl
+
+    def _pin_button(self, master) -> tk.Label:
+        """US14：置顶图钉。钉住 = 实心 + 强调色，松开 = 描边。"""
+        c = self.colors
+        lbl = tk.Label(master, bg=c["panel"], cursor="hand2", padx=7, pady=2)
+        lbl._images = {}
+        try:
+            for state in ("on", "off", "hover"):
+                if state == "on":
+                    img = make_pin_image(16, c["accent"], filled=True)
+                elif state == "off":
+                    img = make_pin_image(16, c["fg_dim"], filled=False)
+                else:
+                    img = make_pin_image(16, c["fg"], filled=bool(
+                        self.cfg.get("always_on_top", True)))
+                photo = ImageTk.PhotoImage(img)
+                lbl._images[state] = photo
+                self._image_refs.append(photo)
+            lbl.configure(image=lbl._images["on" if self.cfg.get("always_on_top", True) else "off"])
+        except Exception:
+            lbl.configure(text="钉", fg=c["fg_dim"], font=self.font_ui)
+        lbl.bind("<Button-1>", lambda _e: self.toggle_topmost())
+        lbl.bind("<Enter>", lambda _e: lbl.configure(
+            image=lbl._images["hover"], bg=c["hover"]))
+        lbl.bind("<Leave>", lambda _e: (lbl.configure(bg=c["panel"]), self._refresh_pin()))
+        return lbl
+
+    def _refresh_pin(self) -> None:
+        lbl = getattr(self, "btn_pin", None)
+        if lbl is None:
+            return
+        images = getattr(lbl, "_images", None) or {}
+        key = "on" if self.cfg.get("always_on_top", True) else "off"
+        if key in images:
+            try:
+                lbl.configure(image=images[key])
+            except Exception:
+                pass
+
+    def module_enabled(self, key: str) -> bool:
+        """US11：模块开关统一从这里读，未启用的模块不显示入口。"""
+        mods = self.cfg.get("modules") or {}
+        return bool(mods.get(key, False))
 
     def _gear_button(self, master) -> tk.Label:
         c = self.colors
@@ -2031,7 +2413,8 @@ class HanziPopup:
 
     def render_text(self, text: str) -> None:
         self.canvas.yview_moveto(0)
-        items = analyze(text, self.cfg.get("tone_style", "symbol"))
+        items = analyze(text, self.cfg.get("tone_style", "symbol"),
+                        bool(self.cfg.get("filter_non_han", True)))
         self.ruby_view.set_items(items)
 
         multi_lines = [
@@ -2122,6 +2505,7 @@ class HanziPopup:
         self.root.attributes("-topmost", new)
         self.cfg["always_on_top"] = new
         save_config(self.cfg)
+        self._refresh_pin()
         self._flash_hint("已置顶" if new else "已取消置顶")
 
     # ---------------- 窗口状态 ----------------
@@ -2258,7 +2642,8 @@ class HanziPopup:
         try:
             menu = pystray.Menu(
                 pystray.MenuItem("首页", later(self.show), default=True),
-                pystray.MenuItem("设置", later(self.open_settings)),
+                # US10：图标统一为齿轮（系统托盘菜单不支持自定义位图，用齿轮字符表达）
+                pystray.MenuItem("⚙ 设置", later(self.open_settings)),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("退出", later(self.quit)),
             )
@@ -2308,22 +2693,18 @@ class HanziPopup:
             print("[warn] 未安装 pynput，全局热键不可用", file=sys.stderr)
             return
 
-        def on_grab():
-            text = self._grab_selection()
-            if text and HANZI_RE.search(text):
-                x, y = cursor_position()
-                self.post(self.show_mini, text, x, y)   # US7：贴着光标弹迷你窗
-            else:
-                self.post(self.show)
-
         def on_quit():
             self.post(self.quit)
 
+        # US15：「抓取选中文字」热键已移除（能力由选中双击覆盖），空值表示禁用
+        bindings = {}
+        quit_key = str(self.cfg.get("quit_hotkey", "") or "")
+        if quit_key:
+            bindings[quit_key] = on_quit
+        if not bindings:
+            return
         try:
-            self._hotkeys = keyboard.GlobalHotKeys({
-                self.cfg.get("hotkey", DEFAULT_CONFIG["hotkey"]): on_grab,
-                self.cfg.get("quit_hotkey", DEFAULT_CONFIG["quit_hotkey"]): on_quit,
-            })
+            self._hotkeys = keyboard.GlobalHotKeys(bindings)
             self._hotkeys.daemon = True
             self._hotkeys.start()
         except Exception as exc:
@@ -2356,8 +2737,8 @@ class HanziPopup:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    # ---------------- 选中双击 → 迷你浮窗（US6 / US7）----------------
-    def _start_mouse_double(self) -> None:
+    # ---------------- 选中双击 → 迷你浮窗（US6 / US7 / US15）----------------
+    def _start_select_double(self) -> None:
         if self._mouse is not None:
             try:
                 self._mouse.stop()
@@ -2366,6 +2747,17 @@ class HanziPopup:
             self._mouse = None
         if not self.cfg.get("select_double_popup", True):
             return
+
+        # US15：键盘模式——连续按两下「选中双击功能键」，与唤起键互斥
+        if self.cfg.get("select_double_mode", "mouse") == "key":
+            key = str(self.cfg.get("select_double_key", "shift") or "")
+            if not key or key == self.cfg.get("trigger_key"):
+                return
+            self._mouse = TriggerKeyListener(
+                key, int(self.cfg.get("double_click_ms", 400)), self._on_select_double_key)
+            self._mouse.start()
+            return
+
         self._mouse = MouseDoubleClickListener(
             self.cfg.get("select_double_button", "left"),
             self.cfg.get("select_double_modifier", "none"),
@@ -2378,6 +2770,13 @@ class HanziPopup:
         """鼠标双击回调（在监听线程里跑，所以另起一个线程读选区）。"""
         if self._closing or not self.cfg.get("select_double_popup", True):
             return
+        threading.Thread(target=self._read_selection_and_pop, args=(x, y), daemon=True).start()
+
+    def _on_select_double_key(self) -> None:
+        """键盘功能键双击回调：光标位置即选区位置。"""
+        if self._closing or not self.cfg.get("select_double_popup", True):
+            return
+        x, y = cursor_position()
         threading.Thread(target=self._read_selection_and_pop, args=(x, y), daemon=True).start()
 
     def _read_selection_and_pop(self, x: int, y: int) -> None:
@@ -2448,19 +2847,59 @@ class HanziPopup:
             return
         self._settings_win = SettingsWindow(self)
 
+    # ---------------- US11 首启引导 / US12 手写板 ----------------
+    def open_first_run(self) -> None:
+        if self._closing:
+            return
+        guide = self._guide
+        if guide is not None and getattr(guide, "alive", False):
+            try:
+                guide.win.deiconify()
+                guide.win.lift()
+                guide.win.focus_force()
+            except Exception:
+                self._guide = None
+            return
+        self._guide = FirstRunWindow(self)
+
+    def open_handwriting(self) -> None:
+        if not self.module_enabled("handwriting"):
+            self._flash_hint("手写模块未启用：设置 → 功能模块")
+            return
+        pad = self._pad
+        if pad is not None and getattr(pad, "alive", False):
+            try:
+                pad.win.deiconify()
+                pad.win.lift()
+                pad.win.focus_force()
+            except Exception:
+                self._pad = None
+            return
+        self._pad = HandwritingPad(self)
+
     def apply_settings(self, values: dict) -> None:
-        old_theme = self.cfg.get("theme")
+        old_theme = (self.cfg.get("theme"), self.cfg.get("theme_background"))
         old_font = int(self.cfg.get("font_size", 32))
         old_tone = self.cfg.get("tone_style", "symbol")
         old_resize = bool(self.cfg.get("resize_enabled", True))
-        old_button = (self.cfg.get("select_double_button"),
-                      self.cfg.get("select_double_modifier"))
+        old_select = (self.cfg.get("select_double_button"),
+                      self.cfg.get("select_double_modifier"),
+                      self.cfg.get("select_double_mode"),
+                      self.cfg.get("select_double_key"))
+        old_hand = self.module_enabled("handwriting")
 
         self.cfg.update(values)
         self.cfg["schemaVersion"] = CONFIG_SCHEMA
         save_config(self.cfg)
 
         self.root.attributes("-topmost", bool(self.cfg.get("always_on_top", True)))
+        self._refresh_pin()
+
+        # US13：主题/背景变了就地重绘（不用重启）
+        new_theme = (self.cfg.get("theme"), self.cfg.get("theme_background"))
+        if new_theme != old_theme:
+            self.rebuild_ui()
+            return
 
         if int(self.cfg.get("font_size", 32)) != old_font:
             self.font_size = int(self.cfg["font_size"])
@@ -2472,7 +2911,8 @@ class HanziPopup:
         self.speech.set_voice(self.cfg.get("tts_voice", "auto"))
 
         # US9：标调方式变了要重新渲染（多音字切换状态一并重置）
-        if self.cfg.get("tone_style", "symbol") != old_tone:
+        if (self.cfg.get("tone_style", "symbol") != old_tone
+                or self.cfg.get("filter_non_han") != values.get("filter_non_han")):
             self.refresh()
 
         # US5：热区厚度/开关变了重新铺一遍
@@ -2489,17 +2929,58 @@ class HanziPopup:
         self._start_trigger()
         self._start_hotkeys()
 
-        # US6：按钮/修饰键变了，重启鼠标监听
-        new_button = (self.cfg.get("select_double_button"),
-                      self.cfg.get("select_double_modifier"))
-        if new_button != old_button or self._mouse is None:
-            self._start_mouse_double()
+        # US6 / US15：按钮、修饰键、模式、功能键任一变化都重启监听
+        new_select = (self.cfg.get("select_double_button"),
+                      self.cfg.get("select_double_modifier"),
+                      self.cfg.get("select_double_mode"),
+                      self.cfg.get("select_double_key"))
+        if new_select != old_select or self._mouse is None:
+            self._start_select_double()
+
+        # US12：手写入口随模块开关出现/消失
+        if self.module_enabled("handwriting") != old_hand:
+            self.rebuild_ui()
+            return
 
         self.hint.configure(text=self._hint_text())
-        if old_theme != self.cfg.get("theme"):
-            self._flash_hint("主题将在重启后生效")
-        else:
-            self._flash_hint("设置已保存")
+        self._flash_hint("设置已保存")
+
+    def rebuild_ui(self) -> None:
+        """按当前配色把主界面整体重画一遍（US13 主题即时生效）。"""
+        text = ""
+        try:
+            text = self.entry.get()
+        except Exception:
+            pass
+        self.theme = normalize_theme(self.cfg.get("theme"))
+        self.colors = theme_colors(self.theme, self.cfg.get("theme_background"))
+        try:
+            self.root.configure(bg=self.colors["panel"])
+        except Exception:
+            pass
+        try:
+            self.outer.destroy()
+        except Exception:
+            pass
+        for child in list(self.root.winfo_children()):
+            if isinstance(child, tk.Menu):
+                try:
+                    child.destroy()
+                except Exception:
+                    pass
+        self._image_refs.clear()
+        self._build_ui()
+        self._bind_events()
+        if text:
+            try:
+                self.entry.insert(0, text)
+            except Exception:
+                pass
+        self._sync_placeholder()
+        self.refresh()
+        self._sync_resize_zones()
+        self.hint.configure(text=self._hint_text())
+        self._flash_hint("主题已应用")
 
     def _restyle_widgets(self) -> None:
         self.title.configure(font=self.font_ui)
@@ -2510,6 +2991,381 @@ class HanziPopup:
         self.entry.configure(font=self.font_entry)
         self.hint.configure(font=self.font_hint)
         self.multi.configure(font=(self.cn_font, 9))
+
+
+# --------------------------------------------------------------------------
+# US12：手写（系统引擎优先，ONNX 离线模型备选）
+# --------------------------------------------------------------------------
+def app_dir() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.argv[0]))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def handwriting_model_path() -> str:
+    return os.path.join(app_dir(), "models", "handwriting.onnx")
+
+
+def handwriting_status(engine: str) -> str:
+    if engine == "offline":
+        path = handwriting_model_path()
+        if not os.path.exists(path):
+            return "离线模型未找到：models/handwriting.onnx（本期未随包提供）"
+        return "离线模型已就绪：models/handwriting.onnx"
+    return "系统手写：Windows Ink 微软同款识别器"
+
+
+def open_system_handwriting(app) -> bool:
+    """唤起 Windows 手写面板，并把焦点交给本程序输入框。
+
+    识别由微软自带的手写识别器完成（与系统输入法同一套引擎），出字后直接落进
+    输入框，主窗口会自动注音——这就是 US12 说的「系统引擎优先」。
+    """
+    try:
+        app.show()
+        app._focus_entry()
+    except Exception:
+        pass
+
+    for path in (
+        r"C:\Program Files\Common Files\microsoft shared\ink\TabTip.exe",
+        r"C:\Program Files (x86)\Common Files\microsoft shared\ink\TabTip.exe",
+    ):
+        if os.path.exists(path):
+            try:
+                subprocess.Popen([path], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                return True
+            except Exception:
+                break
+    # 兜底：Win + Ctrl + O（系统触摸键盘快捷键）
+    try:
+        from pynput.keyboard import Controller, Key
+        kb = Controller()
+        with kb.pressed(Key.cmd):
+            with kb.pressed(Key.ctrl):
+                kb.press("o")
+                kb.release("o")
+        return True
+    except Exception as exc:
+        print(f"[warn] 唤起系统手写面板失败：{exc}", file=sys.stderr)
+        return False
+
+
+class HandwritingPad:
+    """US12：内置手写板。米字格画布用来试写，识别交给系统手写引擎。"""
+
+    def __init__(self, app: HanziPopup):
+        self.app = app
+        self.cfg = app.cfg
+        self.colors = app.colors
+        self.alive = True
+        self.strokes = []
+        self._cur = None
+        self._drag = (0, 0)
+        c = self.colors
+
+        self.win = tk.Toplevel(app.root)
+        self.win.withdraw()
+        self.win.title("手写板")
+        self.win.configure(bg=c["panel"])
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        self._build()
+        self._center()
+        self.win.deiconify()
+        self.win.bind("<Escape>", lambda _e: self.close())
+        self.mouse.focus_set()
+
+    def _build(self) -> None:
+        c = self.colors
+        outer = tk.Frame(self.win, bg=c["panel"], highlightthickness=1,
+                         highlightbackground=c["border"], highlightcolor=c["border"])
+        outer.pack(fill="both", expand=True)
+
+        header = tk.Frame(outer, bg=c["panel"], height=40)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        tk.Label(header, text="手写板", bg=c["panel"], fg=c["fg"],
+                 font=(self.app.cn_font, 12, "bold")).pack(side="left", padx=14)
+        close = tk.Label(header, text="×", bg=c["panel"], fg=c["fg_dim"],
+                         font=self.app.font_ui, padx=10, cursor="hand2")
+        close.pack(side="right", padx=(0, 8))
+        close.bind("<Button-1>", lambda _e: self.close())
+        close.bind("<Enter>", lambda _e: close.configure(bg=c["hover"], fg=c["danger"]))
+        close.bind("<Leave>", lambda _e: close.configure(bg=c["panel"], fg=c["fg_dim"]))
+        header.bind("<ButtonPress-1>", self._start_drag)
+        header.bind("<B1-Motion>", self._do_drag)
+        header.bind("<ButtonRelease-1>", lambda _e: _release_grab(self.win))
+
+        tk.Frame(outer, bg=c["border"], height=1).pack(fill="x")
+
+        board = tk.Frame(outer, bg=c["panel"])
+        board.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+        self.canvas = tk.Canvas(board, width=380, height=260, bg=c["panel_alt"],
+                                highlightthickness=1, highlightbackground=c["border"],
+                                cursor="pencil")
+        self.canvas.pack(fill="both", expand=True)
+        self._draw_grid()
+        self.canvas.bind("<Configure>", lambda _e: self._draw_grid())
+        self.canvas.bind("<ButtonPress-1>", self._stroke_start)
+        self.canvas.bind("<B1-Motion>", self._stroke_move)
+        self.canvas.bind("<ButtonRelease-1>", self._stroke_end)
+
+        # 画布下面放一个不可见 Entry 只是为了拿到键盘焦点，不影响交互
+        self.mouse = tk.Frame(outer, bg=c["panel"], height=0)
+        self.mouse.pack(fill="x")
+
+        tools = tk.Frame(outer, bg=c["panel"])
+        tools.pack(fill="x", padx=14, pady=(0, 4))
+        self._btn(tools, "识别", self.recognize, primary=True).pack(side="left")
+        self._btn(tools, "撤销", self.undo).pack(side="left", padx=6)
+        self._btn(tools, "清空", self.clear).pack(side="left")
+        self._btn(tools, "系统手写面板", self.system_panel).pack(side="right")
+
+        self.status = tk.Label(outer, text=handwriting_status(self.cfg.get("handwriting_engine")),
+                               bg=c["panel"], fg=c["fg_dim"], font=(self.app.cn_font, 8),
+                               anchor="w", justify="left", wraplength=380)
+        self.status.pack(fill="x", padx=14, pady=(0, 10))
+
+    def _btn(self, master, text, cmd, primary=False):
+        c = self.colors
+        bg = c["accent"] if primary else c["panel_alt"]
+        fg = c["accent_fg"] if primary else c["fg"]
+        lbl = tk.Label(master, text=text, bg=bg, fg=fg,
+                       font=(self.app.cn_font, 10), padx=14, pady=5, cursor="hand2")
+        lbl.bind("<Button-1>", lambda _e: cmd())
+        lbl.bind("<Enter>", lambda _e: lbl.configure(
+            bg=c["accent"] if primary else c["hover"]))
+        lbl.bind("<Leave>", lambda _e: lbl.configure(bg=bg))
+        return lbl
+
+    def _draw_grid(self) -> None:
+        """米字格：虚线十字 + 对角线，随画板尺寸自适应。"""
+        c = self.colors
+        self.canvas.delete("grid")
+        w = self.canvas.winfo_width() or 380
+        h = self.canvas.winfo_height() or 260
+        if w < 20 or h < 20:
+            return
+        dash = (4, 6)
+        self.canvas.create_line(w / 2, 6, w / 2, h - 6, fill=c["border"], dash=dash,
+                                tags="grid")
+        self.canvas.create_line(6, h / 2, w - 6, h / 2, fill=c["border"], dash=dash,
+                                tags="grid")
+        self.canvas.create_line(6, 6, w - 6, h - 6, fill=c["border"], dash=dash,
+                                tags="grid")
+        self.canvas.create_line(w - 6, 6, 6, h - 6, fill=c["border"], dash=dash,
+                                tags="grid")
+        self.canvas.tag_lower("grid")
+
+    # ---- 书写 ----
+    def _stroke_start(self, event) -> None:
+        self._cur = [(event.x, event.y)]
+        self.strokes.append(self._cur)
+        self.canvas.create_oval(event.x - 1, event.y - 1, event.x + 1, event.y + 1,
+                                fill=self.colors["fg"], outline="")
+
+    def _stroke_move(self, event) -> None:
+        if not self._cur:
+            return
+        x, y = event.x, event.y
+        px, py = self._cur[-1]
+        self._cur.append((x, y))
+        self.canvas.create_line(px, py, x, y, fill=self.colors["fg"],
+                                width=3, capstyle="round")
+
+    def _stroke_end(self, _event=None) -> None:
+        self._cur = None
+
+    def undo(self) -> None:
+        if not self.strokes:
+            return
+        self.strokes.pop()
+        self._redraw()
+
+    def clear(self) -> None:
+        self.strokes = []
+        self._redraw()
+
+    def _redraw(self) -> None:
+        self.canvas.delete("all")
+        self._draw_grid()
+        for stroke in self.strokes:
+            for (px, py), (x, y) in zip(stroke, stroke[1:]):
+                self.canvas.create_line(px, py, x, y, fill=self.colors["fg"],
+                                        width=3, capstyle="round")
+
+    # ---- 识别 ----
+    def recognize(self) -> None:
+        if not any(len(s) >= 2 for s in self.strokes):
+            self._set_status("先在画板上写一个字，或直接点「系统手写面板」")
+            return
+        if self.cfg.get("handwriting_engine") == "offline":
+            self._set_status(handwriting_status("offline")
+                             + "；改用系统手写面板同样可以出字")
+            return
+        self.system_panel()
+
+    def system_panel(self) -> None:
+        ok = open_system_handwriting(self.app)
+        if ok:
+            self._set_status("已唤起系统手写面板：写在面板里，识别结果会直接进输入框")
+            self.win.after(400, self.close)
+        else:
+            self._set_status("系统手写面板不可用：可试 Win + Ctrl + O 手动打开")
+
+    def _set_status(self, msg: str) -> None:
+        try:
+            self.status.configure(text=msg)
+        except Exception:
+            pass
+
+    # ---- 窗口 ----
+    def _start_drag(self, event) -> None:
+        self._drag = (event.x_root - self.win.winfo_x(),
+                      event.y_root - self.win.winfo_y())
+        try:
+            event.widget.grab_set()
+        except Exception:
+            pass
+
+    def _do_drag(self, event) -> None:
+        self.win.geometry(f"+{event.x_root - self._drag[0]}+{event.y_root - self._drag[1]}")
+
+    def _center(self) -> None:
+        w, h = 420, 430
+        self.win.update_idletasks()
+        x = self.app.root.winfo_x() + (self.app.root.winfo_width() - w) // 2
+        y = self.app.root.winfo_y() + (self.app.root.winfo_height() - h) // 2
+        x = max(40, min(x, self.win.winfo_screenwidth() - w - 40))
+        y = max(40, min(y, self.win.winfo_screenheight() - h - 60))
+        self.win.geometry(f"{w}x{h}+{x}+{y}")
+
+    def close(self) -> None:
+        self.alive = False
+        try:
+            self.win.destroy()
+        except Exception:
+            pass
+        if getattr(self.app, "_pad", None) is self:
+            self.app._pad = None
+
+
+class FirstRunWindow:
+    """US11：首次启动的一次性引导页，列出第 2 批可选功能供勾选。"""
+
+    def __init__(self, app: HanziPopup):
+        self.app = app
+        self.cfg = app.cfg
+        self.colors = app.colors
+        self.alive = True
+        self.vars = {}
+        self._drag = (0, 0)
+        c = self.colors
+
+        self.win = tk.Toplevel(app.root)
+        self.win.withdraw()
+        self.win.title("欢迎使用")
+        self.win.configure(bg=c["panel"])
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        self._build()
+        self._center()
+        self.win.deiconify()
+        self.win.bind("<Escape>", lambda _e: self.confirm())
+
+    def _build(self) -> None:
+        c = self.colors
+        outer = tk.Frame(self.win, bg=c["panel"], highlightthickness=1,
+                         highlightbackground=c["border"], highlightcolor=c["border"])
+        outer.pack(fill="both", expand=True)
+
+        header = tk.Frame(outer, bg=c["panel"])
+        header.pack(fill="x", padx=18, pady=(16, 6))
+        tk.Label(header, text="欢迎使用 汉字拼音浮窗", bg=c["panel"], fg=c["fg"],
+                 font=(self.app.cn_font, 13, "bold"), anchor="w").pack(fill="x")
+        tk.Label(header,
+                 text="先挑几个想用的功能吧：下面都是可选项，之后在「设置 → 功能模块」里随时能改。",
+                 bg=c["panel"], fg=c["fg_dim"], font=(self.app.cn_font, 9),
+                 anchor="w", justify="left", wraplength=420).pack(fill="x", pady=(6, 0))
+        header.bind("<ButtonPress-1>", self._start_drag)
+        header.bind("<B1-Motion>", self._do_drag)
+        header.bind("<ButtonRelease-1>", lambda _e: _release_grab(self.win))
+
+        listwrap = tk.Frame(outer, bg=c["panel_alt"])
+        listwrap.pack(fill="both", expand=True, padx=18, pady=10)
+
+        mods = self.cfg.get("modules") or {}
+        for idx, mod in enumerate(MODULES):
+            var = tk.BooleanVar(value=bool(mods.get(mod["key"], mod.get("default", False))))
+            self.vars[mod["key"]] = var
+            row = tk.Frame(listwrap, bg=c["panel_alt"])
+            row.pack(fill="x", padx=10, pady=1)
+            tk.Checkbutton(
+                row, text=mod["label"], variable=var, bg=c["panel_alt"], fg=c["fg"],
+                selectcolor=c["panel"], activebackground=c["panel_alt"],
+                activeforeground=c["fg"], font=(self.app.cn_font, 9),
+                highlightthickness=0, bd=0, anchor="w", cursor="hand2", width=18,
+            ).pack(side="left")
+            tk.Label(row, text=mod["hint"], bg=c["panel_alt"], fg=c["fg_dim"],
+                     font=(self.app.cn_font, 8), anchor="w").pack(side="left", padx=(4, 0))
+
+        footer = tk.Frame(outer, bg=c["panel"])
+        footer.pack(fill="x", padx=18, pady=(0, 16))
+        tk.Label(footer, text="不选也能用：拼音、朗读、复制、选中双击浮窗都是基础功能。",
+                 bg=c["panel"], fg=c["fg_dim"], font=(self.app.cn_font, 8),
+                 anchor="w").pack(fill="x")
+
+        btns = tk.Frame(footer, bg=c["panel"])
+        btns.pack(fill="x", pady=(8, 0))
+        start = tk.Label(btns, text="开始使用", bg=c["accent"], fg=c["accent_fg"],
+                         font=(self.app.cn_font, 10), padx=18, pady=6, cursor="hand2")
+        start.pack(side="right")
+        start.bind("<Button-1>", lambda _e: self.confirm())
+        none = tk.Label(btns, text="全部不选", bg=c["panel_alt"], fg=c["fg"],
+                        font=(self.app.cn_font, 10), padx=14, pady=6, cursor="hand2")
+        none.pack(side="right", padx=8)
+        none.bind("<Button-1>", lambda _e: self._set_all(False))
+
+    def _set_all(self, value: bool) -> None:
+        for var in self.vars.values():
+            var.set(value)
+
+    def confirm(self) -> None:
+        if not self.alive:
+            return
+        self.cfg["modules"] = {k: bool(v.get()) for k, v in self.vars.items()}
+        self.cfg["first_run"] = False
+        save_config(self.cfg)
+        self.close()
+        self.app.rebuild_ui()
+
+    def _start_drag(self, event) -> None:
+        self._drag = (event.x_root - self.win.winfo_x(),
+                      event.y_root - self.win.winfo_y())
+        try:
+            event.widget.grab_set()
+        except Exception:
+            pass
+
+    def _do_drag(self, event) -> None:
+        self.win.geometry(f"+{event.x_root - self._drag[0]}+{event.y_root - self._drag[1]}")
+
+    def _center(self) -> None:
+        w, h = 480, 560
+        self.win.update_idletasks()
+        x = (self.win.winfo_screenwidth() - w) // 2
+        y = max(60, (self.win.winfo_screenheight() - h) // 2 - 40)
+        self.win.geometry(f"{w}x{h}+{x}+{y}")
+
+    def close(self) -> None:
+        self.alive = False
+        try:
+            self.win.destroy()
+        except Exception:
+            pass
+        if getattr(self.app, "_guide", None) is self:
+            self.app._guide = None
 
 
 # --------------------------------------------------------------------------
@@ -2703,9 +3559,39 @@ class SettingsWindow:
         page = tk.Frame(self.content, bg=c["panel"])
         tk.Label(page, text=group["title"], bg=c["panel"], fg=c["fg"],
                  font=(self.app.cn_font, 12, "bold"), anchor="w").pack(fill="x", pady=(0, 10))
+        if group["key"] == "module":
+            self._build_modules_block(page)
         for item in group["items"]:
             self._build_item(page, item)
         return page
+
+    def _build_modules_block(self, parent) -> None:
+        """US11：15 个可选模块的开关（本期只做开关与入口，功能随迭代交付）。"""
+        c = self.colors
+        tk.Label(parent, text="可选功能模块", bg=c["panel"], fg=c["fg"],
+                 font=(self.app.cn_font, 11, "bold"), anchor="w").pack(fill="x")
+        tk.Label(parent, text="勾选即启用；未启用的模块不加载依赖、不显示入口。",
+                 bg=c["panel"], fg=c["fg_dim"], font=(self.app.cn_font, 8),
+                 anchor="w", justify="left").pack(fill="x", pady=(2, 8))
+
+        grid = tk.Frame(parent, bg=c["panel"])
+        grid.pack(fill="x")
+        mods = self.cfg.get("modules") or {}
+        self.module_vars = {}
+        for idx, mod in enumerate(MODULES):
+            var = tk.BooleanVar(value=bool(mods.get(mod["key"], mod.get("default", False))))
+            self.module_vars[mod["key"]] = var
+            tk.Checkbutton(
+                grid, text=mod["label"], variable=var, bg=c["panel"], fg=c["fg"],
+                selectcolor=c["panel_alt"], activebackground=c["panel"],
+                activeforeground=c["fg"], font=(self.app.cn_font, 9),
+                highlightthickness=0, bd=0, anchor="w", cursor="hand2",
+            ).grid(row=idx, column=0, sticky="w", pady=1)
+            tk.Label(grid, text=mod["hint"], bg=c["panel"], fg=c["fg_dim"],
+                     font=(self.app.cn_font, 8), anchor="w").grid(
+                row=idx, column=1, sticky="w", padx=(10, 0))
+
+        tk.Frame(parent, bg=c["border"], height=1).pack(fill="x", pady=(10, 10))
 
     def _build_item(self, parent, item: dict) -> None:
         c = self.colors
@@ -2749,6 +3635,33 @@ class SettingsWindow:
             if item.get("suffix"):
                 tk.Label(ctrl, text=item["suffix"], bg=c["panel"], fg=c["fg_dim"],
                          font=(self.app.cn_font, 9)).pack(side="left", padx=(4, 0))
+            self.vars[key] = var
+        elif kind == "color":
+            var = tk.StringVar(value=str(self.cfg.get(key) or ""))
+            tk.Entry(
+                ctrl, textvariable=var, width=10, bg=c["entry_bg"], fg=c["fg"],
+                relief="flat", insertbackground=c["fg"], highlightthickness=0, bd=0,
+                font=(self.app.cn_font, 10),
+            ).pack(side="left", ipady=3, padx=(0, 6))
+
+            def pick_color(v=var):
+                from tkinter import colorchooser
+                try:
+                    _rgb, hexv = colorchooser.askcolor(
+                        color=v.get() or None, parent=self.win, title="选择背景色")
+                except Exception:
+                    return
+                if hexv:
+                    v.set(hexv)
+
+            pick = tk.Label(ctrl, text="选择…", bg=c["panel_alt"], fg=c["fg"],
+                            font=(self.app.cn_font, 9), padx=8, pady=3, cursor="hand2")
+            pick.pack(side="left")
+            pick.bind("<Button-1>", lambda _e: pick_color())
+            follow = tk.Label(ctrl, text="跟随主题", bg=c["panel_alt"], fg=c["fg_dim"],
+                              font=(self.app.cn_font, 9), padx=8, pady=3, cursor="hand2")
+            follow.pack(side="left", padx=(4, 0))
+            follow.bind("<Button-1>", lambda _e: var.set(""))
             self.vars[key] = var
         elif kind == "choice":
             choices = self._choices_for(item)
@@ -2836,7 +3749,8 @@ class SettingsWindow:
         tk.Label(
             page,
             text="认字由系统手写引擎负责，本工具负责拼音、朗读与复制。\n"
-                 "双击触发键唤起 · Esc 隐藏 · Ctrl+Alt+P 抓取选区 · Ctrl+Enter 朗读",
+                 "双击触发键唤起 · Esc 隐藏 · Ctrl+Enter 朗读 · 标题栏图钉切换置顶\n"
+                 "首次启动的模块清单可在「功能模块」页随时增删。",
             bg=c["panel"], fg=c["fg_dim"], font=(self.app.cn_font, 8),
             anchor="w", justify="left",
         ).pack(fill="x", pady=(18, 0))
@@ -2898,11 +3812,15 @@ class SettingsWindow:
                     self.vars[key].set(bool(default))
                 elif item["type"] == "int":
                     self.vars[key].set(str(default))
+                elif item["type"] == "color":
+                    self.vars[key].set(str(default or ""))
                 elif item["type"] == "choice" and not item.get("readonly"):
                     choices = self._choices_for(item)
                     label = next((lb for lb, val in choices if val == default),
                                  choices[0][0])
                     self.vars[key].set(label)
+        for key, var in getattr(self, "module_vars", {}).items():
+            var.set(bool(DEFAULT_CONFIG["modules"].get(key, False)))
         self._set_status("已恢复默认值（尚未保存）")
 
     def _collect(self) -> dict:
@@ -2930,6 +3848,18 @@ class SettingsWindow:
                     if label not in mapping:
                         raise ValueError(f"「{item['label']}」取值无效")
                     values[key] = mapping[label]
+                elif item["type"] == "color":
+                    raw = str(var.get() or "").strip()
+                    if not raw:
+                        values[key] = None
+                    elif _hex_to_rgb(raw) is None:
+                        raise ValueError(f"「{item['label']}」需要 #rrggbb 形式的颜色，或留空")
+                    else:
+                        values[key] = raw if raw.startswith("#") else "#" + raw
+        # US11：模块开关
+        values["modules"] = {
+            key: bool(var.get()) for key, var in getattr(self, "module_vars", {}).items()
+        }
         return values
 
     def save(self) -> None:
@@ -2939,16 +3869,42 @@ class SettingsWindow:
             self._set_status(str(exc))
             return
 
-        if values.get("trigger_key") not in TriggerKeyListener.SUPPORTED:
+        trigger = values.get("trigger_key")
+        if trigger and trigger not in TriggerKeyListener.SUPPORTED:
             self._set_status("该按键暂不支持，请换一个")
             return
 
-        if values.get("trigger_key") == "ctrl" and str(
-                values.get("hotkey", "")).startswith("<ctrl>"):
-            self._set_status("提示：双击 Ctrl 与抓取热键都用到 Ctrl，可能相互干扰")
+        # US15：键盘模式下「选中双击功能键」必须与「双击唤起键」不同
+        if values.get("select_double_popup") and values.get("select_double_mode") == "key":
+            sel_key = str(values.get("select_double_key") or "")
+            if not sel_key:
+                self._set_status("键盘模式需要选一个功能键，或改回鼠标模式")
+                return
+            if sel_key == trigger:
+                ok = messagebox.askyesno(
+                    "快捷键冲突",
+                    "该键与唤起快捷键冲突，是否互换唤起与选中的快捷键？",
+                    parent=self.win,
+                )
+                if not ok:
+                    self._restore_choice("select_double_key",
+                                         self.cfg.get("select_double_key", "shift"))
+                    self._set_status("已取消，未做修改")
+                    return
+                values["trigger_key"], values["select_double_key"] = sel_key, trigger
 
         self.app.apply_settings(values)
         self.close()
+
+    def _restore_choice(self, key: str, value: str) -> None:
+        """把某个下拉框回退到 cfg 里的旧值（用户点了「取消」时用）。"""
+        mapping = self.vars.get("__choices__", {}).get(key)
+        var = self.vars.get(key)
+        if not mapping or var is None:
+            return
+        label = next((lb for lb, val in mapping.items() if val == value), None)
+        if label:
+            var.set(label)
 
     def close(self) -> None:
         self.alive = False
@@ -3062,12 +4018,64 @@ def run_selftest() -> int:
         print(f"{s!r}")
         print("  拼音: ", pinyin_plain(items))
         print("  字对: ", pinyin_pairs(items).replace("\n", " | "))
+
+    print()
+    failures = []
+
+    def check(name: str, cond: bool, detail: str = "") -> None:
+        print(("  [OK]   " if cond else "  [FAIL] ") + name + (f"  {detail}" if detail else ""))
+        if not cond:
+            failures.append(name)
+
+    # FR1 过滤
+    check("FR1 过滤非中文/非标点", filter_text("Hello 你好 123！") == "你好！",
+          repr(filter_text("Hello 你好 123！")))
+    items = analyze("Hello 你好 123！")
+    check("FR1 只注音中文", "".join(i["char"] for i in items) == "你好！",
+          "".join(i["char"] for i in items))
+    check("FR1 标点不注音", all(not i["readings"] for i in items if i["char"] == "！"))
+    check("FR1 关闭过滤保留原文", filter_text("abc 你好", False) == "abc 你好")
+
+    # US13 主题
+    check("US13 5 套主题", len(THEMES) == 5, str(sorted(THEMES)))
+    check("US13 默认 Dark+", DEFAULT_CONFIG["theme"] == "dark_plus")
+    dark = theme_colors("dark_plus")
+    light = theme_colors("light_plus")
+    check("US13 深浅两套颜色不同", dark["panel"] != light["panel"])
+    custom = theme_colors("dark_plus", "#203040")
+    check("US13 背景色覆盖生效", custom["panel"].lower() == "#203040", custom["panel"])
+    check("US13 覆盖后其余色自适应", custom["panel_alt"] != dark["panel_alt"])
+    check("US13 非法背景色被忽略",
+          theme_colors("dark_plus", "not-a-color")["panel"] == dark["panel"])
+
+    # US11 模块
+    check("US11 15 个可选模块", len(MODULES) == 15, str(len(MODULES)))
+    mods = default_modules()
+    check("US11 默认只开手写",
+          mods["handwriting"] and sum(1 for v in mods.values() if v) == 1)
+
+    # US15 快捷键
+    check("US15 空值即禁用", TriggerKeyListener("", 400, lambda: None).disabled)
+    check("US15 已移除抓取热键", "hotkey" not in DEFAULT_CONFIG)
+    old = {"schemaVersion": 3, "hotkey": "<ctrl>+<alt>+p", "theme": "dark"}
+    new = migrate(dict(old))
+    check("US15 migrate 清除 hotkey", "hotkey" not in new)
+    check("US13 migrate 主题别名", new["theme"] == "dark_plus", new["theme"])
+    check("配置 schemaVersion 升级", new["schemaVersion"] == CONFIG_SCHEMA,
+          str(new["schemaVersion"]))
+    check("US11 migrate 补齐 modules", isinstance(new.get("modules"), dict)
+          and len(new["modules"]) == 15)
+    check("US17 配置项存在", DEFAULT_CONFIG["popup_dismiss_on_outside_click"] is True)
+    check("US12 手写引擎默认 system", DEFAULT_CONFIG["handwriting_engine"] == "system")
+
     print("\n配置路径:", config_path())
     cfg = load_config()
     print("schemaVersion:", cfg.get("schemaVersion"),
-          "| trigger:", cfg.get("trigger_key"),
-          "| theme:", cfg.get("theme"))
-    return 0
+          "| trigger:", repr(cfg.get("trigger_key")),
+          "| theme:", cfg.get("theme"),
+          "| modules on:", [k for k, v in (cfg.get("modules") or {}).items() if v])
+    print("\n结果:", "全部通过" if not failures else f"{len(failures)} 项未通过 -> {failures}")
+    return 0 if not failures else 1
 
 
 def main(argv=None) -> int:
