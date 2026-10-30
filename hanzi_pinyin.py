@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-汉字拼音浮窗 · Hanzi Pinyin Popup  v1.2.0
+汉字拼音浮窗 · Hanzi Pinyin Popup  v1.2.1
 =========================================
 
 一个常驻托盘的小浮窗：在任何地方写/打出汉字，立刻看到拼音（多音字全列）、
@@ -30,6 +30,10 @@ v1.2.0 迭代：
            与唤起键冲突时弹「是否互换」确认框
     · US17 迷你浮窗点击外部自动关闭（可配置，pin 后不生效）
     · FR1  过滤非中文/非标点字符（"Hello 你好 123！" → 只注音「你好！」）
+
+v1.2.1 修复：
+    · 双击 exe 后主窗口不出现（start_hidden 残留 + 裸 deiconify 不渲染）
+      → 手动启动一律显示主窗口，--hidden 才驻留托盘；启动后 0.9 s 兜底再拉一次
 
 许可证：MIT
 """
@@ -86,7 +90,7 @@ HANZI_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
 # --------------------------------------------------------------------------
 APP_NAME = "HanziPinyinPopup"
 APP_TITLE = "汉字拼音浮窗"
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 CONFIG_SCHEMA = 4
 SINGLE_INSTANCE_PORT = 47653
 PROJECT_URL = "https://github.com/LVE0CL/hanzi_pinyin"
@@ -190,7 +194,7 @@ SETTING_GROUPS = [
                 "key": "start_hidden",
                 "label": "启动时直接驻留托盘",
                 "type": "bool",
-                "hint": "勾选后，启动程序不会自动弹出首页",
+                "hint": "仅对 --hidden 启动（开机自启）生效；手动双击图标仍会显示主窗口",
             },
             {
                 "key": "always_on_top",
@@ -1932,7 +1936,10 @@ class HanziPopup:
             self.root.withdraw()
         else:
             self.refresh()
-            self.root.deiconify()
+            # 用 show() 而不是裸 deiconify()：它带 lift()/topmost 重设，
+            # 无边框窗口在部分 Windows + Tk 组合下只有 deiconify 会"存在但不渲染"
+            self.show()
+            self.root.after(900, self._ensure_visible)
 
         # US11：首次启动弹一次引导页
         if cfg.get("first_run", True):
@@ -2537,6 +2544,20 @@ class HanziPopup:
         self._remember_geometry()
         self._hidden = True
         self.root.withdraw()
+
+    def _ensure_visible(self) -> None:
+        """兜底：启动后若窗口其实没被渲染出来，再拉一次。
+
+        某些 Windows/Tk 组合下无边框窗口会出现"窗口对象存在、屏幕上看不到"，
+        用户双击图标后什么都看不到就会以为程序没启动。
+        """
+        if self._closing or self._hidden:
+            return
+        try:
+            if not self.root.winfo_viewable():
+                self.show()
+        except Exception:
+            pass
 
     def _remember_geometry(self) -> None:
         """记住位置与尺寸（最大化时不记，否则会把 0,0 和整屏尺寸存进配置）。"""
@@ -4097,6 +4118,10 @@ def main(argv=None) -> int:
     cfg = load_config()
     if args.hidden:
         cfg["start_hidden"] = True
+    else:
+        # 手动双击启动（没带 --hidden）一律显示主窗口。
+        # 否则用户点了图标屏幕上什么都没有，只会以为"程序打不开"。
+        cfg["start_hidden"] = False
     app = HanziPopup(cfg)
     serve_instance(instance, app)
     if args.text:

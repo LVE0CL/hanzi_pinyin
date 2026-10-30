@@ -3,7 +3,7 @@
 > 一个常驻 Windows 托盘的汉字工具：**写一个字 / 选中一段字，立刻看到带声调的拼音**，还能朗读、复制、点单字反复听。
 > 本地运行、不联网、不上传任何文字。MIT 许可。
 
-![版本](https://img.shields.io/badge/version-1.2.0-brightgreen)
+![版本](https://img.shields.io/badge/version-1.2.1-brightgreen)
 ![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![许可证](https://img.shields.io/badge/license-MIT-green)
 ![Python](https://img.shields.io/badge/python-3.10%2B-yellow)
@@ -26,6 +26,7 @@
 - [配置文件](#配置文件)
 - [项目结构](#项目结构)
 - [实现要点](#实现要点)
+- [常见问题](#常见问题)
 - [已知限制](#已知限制)
 - [路线图](#路线图)
 - [开发与迭代](#开发与迭代)
@@ -98,7 +99,20 @@
 
 ## 快速开始
 
-### 方式一：跑源码（推荐先这样试）
+### 方式零：下载现成的 exe（零环境，双击即用）
+
+到 [Releases](https://github.com/LVE0CL/hanzi_pinyin/releases) 下载，两种包任选：
+
+| 下载 | 大小 | 说明 |
+| --- | --- | --- |
+| `HanziPinyinPopup-portable.exe` | ~21 MB | **单文件版**。双击即用，只有一个文件。首次启动要先自解压到临时目录，约 2–5 秒（机械盘或杀软实时扫描时更久），这段时间屏幕上是没有任何反应的，不是打不开。 |
+| `HanziPinyinPopup-v1.2.1-win64.zip` | ~21 MB | **绿色版**。解压后双击里面的 `HanziPinyinPopup.exe`，启动最快（约 1 秒）。注意 **exe 必须和同目录的 `_internal` 文件夹放在一起**，只把 exe 单独拷走会报「找不到 python3xx.dll」。 |
+
+两个包都已内置 Python 解释器和 VC++ 运行库，**不需要装 Python、不需要装运行库、不需要管理员权限、不写注册表**。
+
+> 首次运行 Windows 可能弹 SmartScreen「Windows 已保护你的电脑」——点「更多信息 → 仍要运行」即可。程序不联网、不上传任何文字。
+
+### 方式一：跑源码（想改代码时用）
 
 ```bash
 git clone https://github.com/LVE0CL/hanzi_pinyin.git
@@ -111,15 +125,21 @@ python hanzi_pinyin.py
 
 Windows 上也可以直接双击 `start.bat`（会检查依赖并用 `pythonw` 启动，不弹黑框）。
 
-### 方式二：打成单个 exe
+### 方式二：自己打成 exe
 
 ```bash
 pip install pyinstaller
-pyinstaller --noconfirm --windowed --name HanziPinyinPopup hanzi_pinyin.py
-# 产物：dist/HanziPinyinPopup/HanziPinyinPopup.exe
+
+# 绿色版（目录形式，启动快）
+pyinstaller --noconfirm --windowed --noupx --name HanziPinyinPopup hanzi_pinyin.py
+# 产物：dist/HanziPinyinPopup/HanziPinyinPopup.exe（需与 _internal 同目录）
+
+# 单文件版
+pyinstaller --noconfirm --windowed --noupx --onefile --name HanziPinyinPopup-portable hanzi_pinyin.py
 ```
 
-> 打包需要 Python ≤ 3.13（PyInstaller 对 3.14 的支持滞后）。离线手写模型若将来随包提供，放到 `models/` 并加 `--add-data "models;models"`。
+> 加 `--noupx`：UPX 压缩会让启动变慢，也更容易被杀软误报。
+> **不要把 `--distpath` / `--workpath` 指到中文长路径下**，Windows 上 PyInstaller 拷贝 DLL 时会报 `PermissionError`，换到 `C:\build` 这类短路径即可。
 
 ### 依赖
 
@@ -325,6 +345,27 @@ docs/                      # 截图
 - **跨线程回调一律走队列**：托盘、键盘、鼠标监听都在别的线程，`root.after` 轮询把回调搬回主线程；退出前 `after_cancel` 掉所有 job，否则控制台会刷 `invalid command name`。
 - **配置原子写**：临时文件 + `flush` + `fsync` + `os.replace`。
 
+## 常见问题
+
+**双击 exe，屏幕上什么都没有？**
+
+按顺序排查：
+
+1. **单文件版首次启动要自解压**，21 MB 解到临时目录大约 2–5 秒，这期间没有任何窗口。等一会儿，或改用绿色版 zip（约 1 秒）。
+2. **托盘里已经有了**：Windows 默认把新托盘图标收进任务栏的「^」溢出区，点开就能看到齿轮图标，双击它调出首页。程序是单实例的，重复双击 exe 只会把已有窗口叫出来。
+3. **配置里勾过「启动时直接驻留托盘」**：v1.2.1 起，手动双击 exe 一律显示主窗口，只有带 `--hidden` 参数（给开机自启留的）才驻留托盘。如果你用的是旧版，删掉 `%APPDATA%\HanziPinyinPopup\config.json` 再启动即可。
+4. **被杀软拦了**：未签名的 PyInstaller exe 常被误报，把文件加白名单，或者照「方式二」自己从源码打包。
+
+**报错「找不到 python3xx.dll」/「应用程序无法正常启动」？**
+
+绿色版只拿到了 exe、没带上同目录的 `_internal` 文件夹。整个文件夹一起拷，或者改用单文件版。
+
+**窗口出现在屏幕外 / 找不到了？**
+
+删掉 `%APPDATA%\HanziPinyinPopup\config.json`（只丢设置，不丢任何数据），下次启动会回到默认位置。
+
+---
+
 ## 已知限制
 
 - **只重点验证了 Windows 10/11**：图钉、手写、SAPI 朗读、UIA 读选区都是 Windows 路径；macOS / Linux 有对应代码分支但未实测。
@@ -340,6 +381,7 @@ docs/                      # 截图
 - [x] v1.0.1 托盘常驻 · 双击唤起 · 自定义标题栏 · 统一设置 · 配置迁移
 - [x] v1.1.0 八向缩放 · 选中双击迷你浮窗 · 嗓音与标调 · 多音字点击
 - [x] v1.2.0 齿轮图标 · 5 套主题 + 背景覆盖 · 图钉置顶 · 快捷键重构 · 首启引导与模块框架 · 手写板 · 非中文过滤 · 点浮窗外关闭
+- [x] v1.2.1 修复双击 exe 后主窗口不出现 · 提供单文件版和绿色版 zip
 - [ ] v1.3.x 把 15 个模块逐个落地（先做笔画动画、生词本 SRS、声调图）
 - [ ] 离线手写模型（CASIA-HWDB 训练）替换系统面板依赖
 - [ ] 设置界面内直接预览主题色板
