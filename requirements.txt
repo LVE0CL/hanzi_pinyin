@@ -1,0 +1,10 @@
+# 核心依赖
+pypinyin>=0.50
+pyperclip>=1.8
+
+# 全局热键 / 双击触发键
+pynput>=1.7
+
+# 系统托盘图标（+ 图标绘制）
+pystray>=0.19
+pillow>=9.0
