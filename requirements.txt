@@ -2,9 +2,10 @@
 pypinyin>=0.50
 pyperclip>=1.8
 
-# 全局热键 / 双击触发键
+# 全局按键 / 鼠标监听、系统托盘、图标绘制
 pynput>=1.7
-
-# 系统托盘图标（+ 图标绘制）
 pystray>=0.19
 pillow>=9.0
+
+# Windows 专用：用 UI Automation 直接读选区，不碰剪贴板（缺失时自动退回剪贴板兜底）
+uiautomation>=2.0 ; sys_platform == "win32"

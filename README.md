@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#)
-[![Version](https://img.shields.io/badge/version-1.0.1-green.svg)](#)
+[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](#)
 
 ![主界面](docs/screenshot.png)
 
@@ -31,6 +31,15 @@
 - **一键朗读**：调用系统 TTS（Windows 用 SAPI，macOS 用 `say`，Linux 用 `spd-say`/`espeak`）
 - **抓取选中文字**：任意程序里选中文字，按 `Ctrl+Alt+P`，浮窗读取选区并显示拼音
 - **一键复制**：复制纯拼音（`chóng qìng`）或"字 + 拼音"对照
+
+**顺手即查（v1.1.0 新增）**
+
+- **选中双击出浮窗**：在任意程序里选中一段文字，双击鼠标，光标旁立刻弹出迷你浮窗显示拼音——不打开主窗口、不打断手上的事
+- **不碰你的剪贴板**：用 Windows UI Automation 直接读选区，复制的内容始终是你原来的
+- **点单字朗读**：点浮窗里的某一个字，只读这个字；多音字顺带切到下一个读音
+- **标调三选一**：符号调 `hàn` / 数字调 `han4` / 无声调 `han`，随时切换
+- **朗读嗓音可选**：跟随系统 / 女声优先 / 男声优先，或指定系统里某个具体嗓音
+- **拖动改大小**：窗口八条边、四个角都能拖着改尺寸，最小 320×200，尺寸自动记住
 
 **桌面集成（v1.0.0 新增）**
 
@@ -60,6 +69,10 @@
 
 ![最大化](docs/maximized.png)
 
+选中文字后双击，光标旁弹出迷你浮窗（可拖动、可固定、超时淡出）：
+
+![迷你浮窗](docs/mini_popup.png)
+
 ## 快速开始
 
 ### Windows（推荐）
@@ -70,7 +83,7 @@
 也可以手动来：
 
 ```bat
-git clone https://github.com/<your-name>/hanzi-pinyin-popup.git
+git clone https://github.com/LVE0CL/hanzi_pinyin.git
 cd hanzi-pinyin-popup
 python -m pip install -r requirements.txt
 pythonw hanzi_pinyin.py
@@ -79,7 +92,7 @@ pythonw hanzi_pinyin.py
 ### macOS / Linux
 
 ```bash
-git clone https://github.com/<your-name>/hanzi-pinyin-popup.git
+git clone https://github.com/LVE0CL/hanzi_pinyin.git
 cd hanzi-pinyin-popup
 ./run.sh
 ```
@@ -97,9 +110,20 @@ cd hanzi-pinyin-popup
 
 > 触摸板也能写：按住触摸板拖动就是在画笔画，抬手即断笔。想更顺手就把指针速度调慢、关掉"轻点以单击"。
 
-### 2. 抓取别处的文字
+### 2. 选中文字后双击（最快）
 
-在任何程序（浏览器、PDF、Word）里选中一段文字，按 `Ctrl+Alt+P`，浮窗会读取选区并显示拼音。
+在浏览器、PDF、Word、记事本里选中一段文字，**双击鼠标左键**（不要拖选，选好再点两下），光标旁立刻弹出迷你浮窗：
+
+- 点 `朗读` 整段读一遍，点某个字只读这个字；
+- 点 `复制` 拿到拼音，右键还有「字 + 拼音」对照；
+- 点 `固定` 就让它待着，否则默认 4 秒后淡出。
+
+> 读选区走的是 Windows UI Automation，**不会动你的剪贴板**——剪贴板里原来复制的文件、链接都还在。
+> 也正因为如此，它只对暴露了文本接口的控件有效（记事本、Word、浏览器正文、大部分编辑框）；落在文件列表、桌面、按钮上时双击完全不受影响。
+
+### 2.1 抓取别处的文字（热键方式）
+
+按 `Ctrl+Alt+P` 也行，效果一样。这条路径在 UI Automation 读不到时会**兜底**：备份剪贴板 → 模拟 `Ctrl+C` → 读完还原，你原来的复制内容不会丢。
 
 ### 3. 直接粘贴
 
@@ -109,6 +133,7 @@ cd hanzi-pinyin-popup
 
 | 快捷键 | 作用 |
 | --- | --- |
+| **选中文字后双击鼠标左键** | 光标旁弹出迷你浮窗查拼音（按钮与修饰键可改） |
 | **双击 `Ctrl`** | 唤起 / 前置首页（触发键可在设置里改） |
 | `Ctrl+Alt+P` | 抓取当前选中文字（可改为 Ctrl+Shift+P / Alt+Shift+P） |
 | `Ctrl+Alt+Q` | 退出程序 |
@@ -124,6 +149,9 @@ cd hanzi-pinyin-popup
 | `−` | **隐藏**到托盘，进程继续运行 |
 
 > 按住标题栏空白处拖动可以移动窗口；最大化状态下拖动自动禁用。
+> 窗口四边与四角还有 6px 的缩放热区，鼠标移上去会变成双向箭头，按住即可改大小。
+
+迷你浮窗上从右往左是 `×` 关闭、`固定`、`朗读`、`复制`；点一个字只读这个字，多音字顺便切换读音。
 
 ## 设置
 
@@ -134,9 +162,9 @@ cd hanzi-pinyin-popup
 
 | 分组 | 内容 |
 | --- | --- |
-| 通用 | 启动时直接驻留托盘、窗口置顶、界面语言（多语言为后续版本预留） |
-| 快捷键 | 双击唤起的按键、双击判定间隔（150–1000 ms）、抓取选中文字的热键 |
-| 功能模块 | 剪贴板自动识别、汉字字号、朗读语速、界面主题 |
+| 通用 | 启动时直接驻留托盘、窗口置顶、界面语言（预留）、拖动改大小、窗口最小宽高 |
+| 快捷键 | 双击唤起的按键、双击判定间隔（150–1000 ms）、抓取选中文字的热键、选中双击（开关/鼠标键/修饰键）、优先查询选区 |
+| 功能模块 | 剪贴板自动识别、汉字字号、朗读语速、朗读嗓音、点单字朗读、抓取不破坏剪贴板、标调方式、浮窗自动淡出、浮窗默认固定、界面主题 |
 | 关于 | 版本号、配置版本（`schemaVersion`）、配置目录、运行环境、项目主页 |
 
 底部三个按钮：**恢复默认 / 取消 / 保存**。保存后立刻生效并写入磁盘，重启后保留。
@@ -153,18 +181,31 @@ cd hanzi-pinyin-popup
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `schemaVersion` | `2` | 配置版本，用于升级迁移 |
+| `schemaVersion` | `3` | 配置版本，用于升级迁移 |
 | `start_hidden` | `false` | 启动后只驻留托盘，不弹窗 |
+| `always_on_top` | `true` | 是否置顶 |
+| `resize_enabled` | `true` | 允许拖动边缘改大小 |
+| `resize_pad` | `6` | 边缘缩放热区厚度（px） |
+| `min_width` / `min_height` | `320` / `200` | 缩放的下限 |
 | `trigger_key` | `"ctrl"` | 双击唤起的按键（`ctrl`/`alt`/`shift`/`space`/`tab`/`f1`…`f12`） |
 | `double_click_ms` | `400` | 双击判定间隔（毫秒，150–1000） |
 | `hotkey` | `"<ctrl>+<alt>+p"` | 抓取选区热键，[pynput 语法](https://pynput.readthedocs.io/en/latest/keyboard.html#global-hotkeys) |
 | `quit_hotkey` | `"<ctrl>+<alt>+q"` | 退出热键 |
-| `always_on_top` | `true` | 是否置顶 |
-| `theme` | `"dark"` | `dark` / `light`（切换后重启生效） |
-| `font_size` | `32` | 汉字字号（像素近似值） |
-| `window_width` | `420` | 窗口宽度 |
+| `select_double_popup` | `true` | 选中文字后双击弹迷你浮窗 |
+| `select_double_button` | `"left"` | `left` / `right` / `middle` |
+| `select_double_modifier` | `"none"` | `none` / `ctrl` / `alt` / `shift` |
+| `trigger_prefers_selection` | `false` | 双击触发键时有选区则弹浮窗而不是首页 |
 | `auto_clipboard` | `false` | 打开后，剪贴板出现汉字就自动显示拼音 |
+| `font_size` | `32` | 汉字字号（像素近似值） |
 | `speech_rate` | `0` | 语速，`-10` ~ `10` |
+| `tts_voice` | `"auto"` | `auto` / `female` / `male` / 具体 SAPI 嗓音名 |
+| `read_char_on_click` | `true` | 点单字只读这个字 |
+| `preserve_clipboard` | `true` | 抓取选区后还原剪贴板 |
+| `tone_style` | `"symbol"` | `symbol` / `num` / `none` |
+| `theme` | `"dark"` | `dark` / `light`（切换后重启生效） |
+| `mini_popup_auto_hide_ms` | `4000` | 浮窗停留时长，0 = 不自动消失 |
+| `mini_popup_pinned` | `false` | 浮窗默认固定 |
+| `window_width` / `window_height` | `420` / `200` | 窗口尺寸，拖动或隐藏时自动记录 |
 | `position` | `null` | 窗口位置，隐藏/退出时自动记录 |
 
 ## 常见问题
@@ -178,6 +219,25 @@ cd hanzi-pinyin-popup
 **托盘图标不见了？**
 
 程序启动时如果托盘初始化失败，会把窗口直接显示出来并在控制台打印原因（用 `python hanzi_pinyin.py` 前台运行可以看到）。Linux 下通常是缺 AppIndicator 依赖。
+
+**选中文字后双击没反应？**
+
+1. 先确认「设置 → 快捷键 → 选中双击弹浮窗」是开着的；
+2. 这个功能依赖 `uiautomation`（`pip install -r requirements.txt` 会一起装）。没装或控件不暴露文本接口时，双击不会触发——这是刻意的：宁可不动，也不要在资源管理器里双击时替你按 `Ctrl+C` 把文件复制走；
+3. 如果和你常用软件的双击手势撞了，可以在设置里给这个手势加一个修饰键（按住 `Ctrl`/`Alt`/`Shift` 再双击）；
+4. 兜底路径只在光标确实落在文本控件上时才启用。
+
+**想让双击 Ctrl 直接查选中的词？**
+
+打开「设置 → 快捷键 → 优先查询选区」：有选区时双击触发键弹迷你浮窗，没选区时照旧唤起首页。
+
+**拖不到窗口边缘改大小？**
+
+窗口边缘只有 6px 的热区，最大化状态下会禁用。嫌难点可以把 `config.json` 里的 `resize_pad` 调大到 8~10。
+
+**朗读没有男声？**
+
+Windows 默认只装了一两个嗓音（通常只有女声）。去「设置 → 时间和语言 → 语音 → 添加语音」装一个中文语音包，回到「设置 → 功能模块 → 朗读嗓音」就能选到具体嗓音。
 
 **点朗读没声音？**
 
@@ -212,9 +272,11 @@ Windows 首次调用 SAPI 有 0.5 秒左右启动延迟，属正常。若完全�
 - 托盘：`pystray` + `Pillow`（图标运行时绘制，不依赖图片资源）
 - 全局按键：`pynput`
 - 剪贴板：`pyperclip`
+- 读选区：Windows `uiautomation`（TextPattern），读不到再走剪贴板备份还原
 - 朗读：Windows 下常驻一个 PowerShell `System.Speech` 进程（文本走 base64 传输，避开控制台编码问题），其他平台走系统命令
 
-> 托盘线程与键盘监听线程都不直接碰 Tk —— 它们把回调塞进队列，由主线程每 60 ms 取一次执行，避免 `main thread is not in main loop`。
+> 托盘线程、键盘监听、鼠标监听都不直接碰 Tk —— 它们把回调塞进队列，由主线程每 60 ms 取一次执行，避免 `main thread is not in main loop`。
+> UI Automation 的 COM 初始化是按线程的，所以读选区一律在刚起的短线程里做，读完再 `post()` 回主线程。
 
 ## 开发
 
@@ -243,14 +305,23 @@ python hanzi_pinyin.py --version
 2. 在 `migrate()` 里补一段 `if v < N: ...` 的转换；
 3. 老配置会在下次启动时自动升级。
 
+### 迭代方式
+
+每次迭代都在 `开发文档.md` 里写需求（结构：目标 / 范围 / 用户故事与验收 / 设置架构 / 技术约束 / 任务拆分），做完后归档到 `开发文档归档文件夹/第N次开发文档.md`，再把 `开发文档.md` 换成下一次的待办模板。规则见 [开发规范.md](开发规范.md)。
+
 欢迎提 Issue / PR。想加的方向：
 
 - [x] 托盘图标 / 双击唤起 / 统一设置界面
-- [ ] 开机自启（Windows 注册表 / macOS LaunchAgent / Linux autostart）
-- [ ] 多语言界面（配置里已留 `language` 字段）
+- [x] 拖动改变窗口大小（八向热区）
+- [x] 选中文字双击弹迷你浮窗 / 贴光标定位 / 固定 / 超时淡出
+- [x] 朗读嗓音可选、点单字朗读、抓取选区不破坏剪贴板
+- [x] 标调方式切换（符号 / 数字 / 无声调）、多音字点击切换
+- [ ] 生词本与历史记录
 - [ ] 部首、笔画数、简单释义（接 CC-CEDICT）
+- [ ] 开机自启（Windows 注册表 / macOS LaunchAgent / Linux autostart）
+- [ ] 整段批量转拼音 + 导出
+- [ ] 多语言界面（配置里已留 `language` 字段）
 - [ ] 内置手写板（直接调 Windows Ink 引擎，省掉切换输入法这一步）
-- [ ] 历史上查过的字
 
 ## 许可证
 
@@ -258,4 +329,4 @@ python hanzi_pinyin.py --version
 
 ---
 
-<sub>发布前请把 `LICENSE`、README 和 `PROJECT_URL` 里的 `<your-name>` 换成你自己的名字/ID。</sub>
+<sub>拼音数据来自 pypinyin；如果你fork了本项目，记得把 `LICENSE`、`README` 和 `PROJECT_URL` 换成自己的仓库地址。</sub>
