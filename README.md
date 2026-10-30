@@ -1,332 +1,370 @@
 # 汉字拼音浮窗 · Hanzi Pinyin Popup
 
-> 一个常驻系统托盘的小浮窗：随手写/打出一个不认识的字，立刻看到它的拼音，点一下还能读出来。
+> 一个常驻 Windows 托盘的汉字工具：**写一个字 / 选中一段字，立刻看到带声调的拼音**，还能朗读、复制、点单字反复听。
+> 本地运行、不联网、不上传任何文字。MIT 许可。
 
-[![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#)
-[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](#)
+![版本](https://img.shields.io/badge/version-1.2.0-brightgreen)
+![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
+![许可证](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-3.10%2B-yellow)
 
-![主界面](docs/screenshot.png)
+![主界面（Dark+ 主题）](docs/main_dark.png)
 
-## 为什么做这个
+---
 
-用 Windows 自带手写写生字，字能出来，但**系统不会告诉你它念什么**——微软拼音的手写面板只给候选汉字，没有拼音显示，也没有任何官方开关或补丁。
+## 目录
 
-而开源的方案大多走另一条路：靠笔画拓扑匹配的引擎（HanziLookup / Zinnia 一类）识别率不高，写歪一点就给出一堆不相干的字，更别说标拼音了。
+- [它解决什么问题](#它解决什么问题)
+- [核心功能](#核心功能)
+- [界面预览](#界面预览)
+- [快速开始](#快速开始)
+- [怎么用](#怎么用)
+- [快捷键一览](#快捷键一览)
+- [设置项](#设置项)
+- [主题与配色](#主题与配色)
+- [可选功能模块](#可选功能模块)
+- [配置文件](#配置文件)
+- [项目结构](#项目结构)
+- [实现要点](#实现要点)
+- [已知限制](#已知限制)
+- [路线图](#路线图)
+- [开发与迭代](#开发与迭代)
+- [许可证](#许可证)
 
-这个工具把两件事拆开：
+---
 
-- **认字**交给系统手写引擎（识别质量等同商业输入法，写歪了也能认）；
-- **拼音、读音、复制**交给这个小浮窗。
+## 它解决什么问题
 
-于是流程变成：在浮窗里手写 → 字一上屏 → 拼音立刻显示在下面。
+遇到不认识的字，最省事的办法是"写一遍"。但**微软拼音的手写面板只认得字，不告诉你读什么**，还得再复制去查。
 
-## 功能
+这个小工具把最后一段补上了：
 
-**拼音相关**
+1. 系统手写面板写字 → 字落进输入框；
+2. 浮窗立刻在字上方标出拼音（多音字全列）；
+3. 点单字能听读音，一键复制纯拼音或「字 + 拼音」对照表。
 
-- **实时拼音**：输入框内容一变，下方立刻显示每个汉字的拼音（带声调、自动分词）
-- **多音字全列**：主读音按上下文判断（"重庆"读 chóng qìng），其余读音一并列出
-- **一键朗读**：调用系统 TTS（Windows 用 SAPI，macOS 用 `say`，Linux 用 `spd-say`/`espeak`）
-- **抓取选中文字**：任意程序里选中文字，按 `Ctrl+Alt+P`，浮窗读取选区并显示拼音
-- **一键复制**：复制纯拼音（`chóng qìng`）或"字 + 拼音"对照
+也可以直接把字打进输入框，或者在任意软件里选中文字后**双击鼠标**、在光标旁弹出迷你浮窗。
 
-**顺手即查（v1.1.0 新增）**
+---
 
-- **选中双击出浮窗**：在任意程序里选中一段文字，双击鼠标，光标旁立刻弹出迷你浮窗显示拼音——不打开主窗口、不打断手上的事
-- **不碰你的剪贴板**：用 Windows UI Automation 直接读选区，复制的内容始终是你原来的
-- **点单字朗读**：点浮窗里的某一个字，只读这个字；多音字顺带切到下一个读音
-- **标调三选一**：符号调 `hàn` / 数字调 `han4` / 无声调 `han`，随时切换
-- **朗读嗓音可选**：跟随系统 / 女声优先 / 男声优先，或指定系统里某个具体嗓音
-- **拖动改大小**：窗口八条边、四个角都能拖着改尺寸，最小 320×200，尺寸自动记住
+## 核心功能
 
-**桌面集成（v1.0.0 新增）**
+**看拼音**
+- 带声调符号显示（hàn / han4 / han 三种写法可切）
+- 多音字全列，点字切换并朗读
+- 词组消歧：「重庆」读 chóng qìng，「银行」读 yín háng
+- 非中文内容自动过滤：`Hello 你好 123！` → 只标注「你好！」
 
-- **托盘常驻**：托盘右键菜单 **首页 / 设置 / 退出**，主窗口关掉也在后台待命
-- **双击唤起**：默认**连按两下 Ctrl** 就能唤出首页；触发键可选 Ctrl / Alt / Shift / 空格 / Tab / F1–F12，双击间隔可调（默认 400 ms）
-- **自定义标题栏**：右上角 `−` 隐藏到托盘、`□` 最大化（保留标题栏）、`×` 退出；按住标题栏任意空白处即可拖动窗口
-- **统一设置界面**：托盘菜单或首页右下角齿轮进入同一个窗口，分「通用 / 快捷键 / 功能模块 / 关于」四组
-- **配置带版本号**：`schemaVersion` + 迁移函数，升级不丢配置；加一个新设置项只需加一条配置定义
-- **单实例运行**：重复启动只会唤出已有窗口，不会有第二个托盘图标
-- 纯本地运行，不联网、不写注册表、不留后台服务
+**随手就查**
+- 双击 `Ctrl` 唤起首页（按键与间隔可改，也可关掉）
+- 选中文字后**双击鼠标**（或连续按两下 `Shift`），光标旁弹出迷你浮窗
+- 迷你浮窗可拖动、可固定、超时自动淡出、**点外面自动消失**
+- 可选：剪贴板一出现中文就自动弹窗
 
-## 界面
+**听与复制**
+- Windows SAPI 朗读，嗓音 / 语速可选
+- 点单字朗读，多音字顺便切到下一个读音
+- 复制纯拼音，或复制「字 ⇥ 拼音」对照
+- 抓取选区时不破坏你原来的剪贴板内容
 
-| 首页（空状态） | 首页（有内容） |
+**窗口与外观**
+- 无边框窗口，8 向拖动改大小，尺寸与位置记忆
+- 标题栏：`📌 置顶 | − 托盘 | □ 最大化 | × 退出`
+- 5 套 VS Code 风配色（默认 Dark+），可自定义背景色，保存即生效
+- 首次启动引导页：勾选想用的模块，之后在设置里随时增删
+
+---
+
+## 界面预览
+
+| 浅色主题（Light+） | 自定义背景（Monokai + 深青底） |
 | --- | --- |
-| ![空状态](docs/main_empty.png) | ![有内容](docs/screenshot.png) |
+| ![Light+](docs/main_light.png) | ![自定义背景](docs/main_custom_bg.png) |
 
-| 设置 · 通用 | 设置 · 快捷键 |
+| 选中双击弹出迷你浮窗 | 内置手写板 |
 | --- | --- |
-| ![设置通用](docs/settings.png) | ![设置快捷键](docs/settings_shortcut.png) |
+| ![迷你浮窗](docs/mini_popup.png) | ![手写板](docs/handwriting.png) |
 
-| 设置 · 功能模块 | 设置 · 关于 |
+| 首次启动引导 | 功能模块开关 |
 | --- | --- |
-| ![设置功能模块](docs/settings_module.png) | ![设置关于](docs/settings_about.png) |
+| ![首启引导](docs/first_run.png) | ![模块开关](docs/settings_module.png) |
 
-点击 `□` 最大化后标题栏仍在，内容自动垂直居中（窗口不会盖住任务栏，托盘图标照样能点）：
+设置界面（通用 / 快捷键 / 功能模块 / 关于，内容区可滚动）：
 
-![最大化](docs/maximized.png)
+![设置 · 通用](docs/settings_general.png)
+![设置 · 快捷键](docs/settings_shortcut.png)
 
-选中文字后双击，光标旁弹出迷你浮窗（可拖动、可固定、超时淡出）：
-
-![迷你浮窗](docs/mini_popup.png)
+---
 
 ## 快速开始
 
-### Windows（推荐）
-
-1. 安装 [Python 3.8+](https://www.python.org/downloads/)，安装时勾选 **Add python.exe to PATH**；
-2. 下载本项目，双击 **`start.bat`**（首次会自动装依赖，之后直接启动）。
-
-也可以手动来：
-
-```bat
-git clone https://github.com/LVE0CL/hanzi_pinyin.git
-cd hanzi-pinyin-popup
-python -m pip install -r requirements.txt
-pythonw hanzi_pinyin.py
-```
-
-### macOS / Linux
+### 方式一：跑源码（推荐先这样试）
 
 ```bash
 git clone https://github.com/LVE0CL/hanzi_pinyin.git
-cd hanzi-pinyin-popup
-./run.sh
+cd hanzi_pinyin
+python -m venv .venv
+.venv\Scripts\activate          # macOS / Linux: source .venv/bin/activate
+pip install -r requirements.txt
+python hanzi_pinyin.py
 ```
 
-> macOS / Linux 上全局热键与托盘需要系统授权：macOS 要在「系统设置 → 隐私与安全性 → 辅助功能 / 输入监控」里放行；Linux 下的托盘依赖 GTK/AppIndicator（Debian/Ubuntu：`sudo apt install python3-gi gir1.2-appindicator3-0.1`）。这块未做深度适配，欢迎提 PR。
+Windows 上也可以直接双击 `start.bat`（会检查依赖并用 `pythonw` 启动，不弹黑框）。
 
-## 三种用法
+### 方式二：打成单个 exe
 
-### 1. 配合系统手写（主要场景）
+```bash
+pip install pyinstaller
+pyinstaller --noconfirm --windowed --name HanziPinyinPopup hanzi_pinyin.py
+# 产物：dist/HanziPinyinPopup/HanziPinyinPopup.exe
+```
 
-1. 连按两下 `Ctrl` 唤出浮窗，光标会自动落在输入框；
-2. 唤出 Windows 触摸键盘（任务栏键盘图标），左上角齿轮 → **手写**；
-3. 用鼠标、触摸板、触屏或数位板写字，字会输入到输入框；
-4. 拼音立刻出现在字的下方，点 **朗读** 听读音，点 **复制** 拿到拼音。
+> 打包需要 Python ≤ 3.13（PyInstaller 对 3.14 的支持滞后）。离线手写模型若将来随包提供，放到 `models/` 并加 `--add-data "models;models"`。
 
-> 触摸板也能写：按住触摸板拖动就是在画笔画，抬手即断笔。想更顺手就把指针速度调慢、关掉"轻点以单击"。
+### 依赖
+
+| 包 | 用途 |
+| --- | --- |
+| `pypinyin` | 拼音与多音字、词组消歧 |
+| `pyperclip` | 跨平台剪贴板 |
+| `pynput` | 全局按键 / 鼠标监听 |
+| `pystray` | 系统托盘图标与菜单 |
+| `pillow` | 图标与齿轮 / 图钉位图绘制 |
+| `uiautomation` | 仅 Windows：用 UI Automation 直接读选区，不动剪贴板（缺失时自动退回剪贴板兜底） |
+
+---
+
+## 怎么用
+
+### 1. 查拼音
+
+在浮窗输入框里写字（或粘贴），上方立即出现标好声调的拼音。多音字会多显示几行，点字可切换读音。
 
 ### 2. 选中文字后双击（最快）
 
-在浏览器、PDF、Word、记事本里选中一段文字，**双击鼠标左键**（不要拖选，选好再点两下），光标旁立刻弹出迷你浮窗：
+1. 在任意软件里选中一段文字；
+2. **双击鼠标左键**（可在设置里改成右键 / 中键，或加修饰键）；
+3. 光标旁弹出迷你浮窗，显示拼音。
 
-- 点 `朗读` 整段读一遍，点某个字只读这个字；
-- 点 `复制` 拿到拼音，右键还有「字 + 拼音」对照；
-- 点 `固定` 就让它待着，否则默认 4 秒后淡出。
+如果不想动鼠标：设置 → 快捷键 → 选中双击模式改成**键盘**，之后连续按两下 `Shift` 即可。
+连续按两下 `Ctrl` 走的是首页（输入框），两者可以互换。
 
-> 读选区走的是 Windows UI Automation，**不会动你的剪贴板**——剪贴板里原来复制的文件、链接都还在。
-> 也正因为如此，它只对暴露了文本接口的控件有效（记事本、Word、浏览器正文、大部分编辑框）；落在文件列表、桌面、按钮上时双击完全不受影响。
+### 3. 手写一个字
 
-### 2.1 抓取别处的文字（热键方式）
+标题栏下方的「手写」入口（或右键菜单「手写板…」）：
 
-按 `Ctrl+Alt+P` 也行，效果一样。这条路径在 UI Automation 读不到时会**兜底**：备份剪贴板 → 模拟 `Ctrl+C` → 读完还原，你原来的复制内容不会丢。
+- 米字格画板可以用鼠标试写，支持撤销 / 清空；
+- 点「识别」或「系统手写面板」，会唤起 **Windows 自带手写面板**并把焦点交给输入框——
+  识别由微软同款引擎完成，出字后直接落进输入框，浮窗随即标注拼音；
+- 手写是可选模块，可在设置里关掉。
 
-### 3. 直接粘贴
+### 4. 听读音 / 复制
 
-把字粘进输入框即可，长句会自动折行，超过半屏高时出现滚动条。
+- 点「朗读」或按 `Ctrl+Enter` 读整段；
+- 点某一个字只读这个字；
+- 点「复制」拿纯拼音，右键菜单里可复制「字 + 拼音」对照表。
 
-## 快捷键
+### 5. 放进托盘
 
-| 快捷键 | 作用 |
-| --- | --- |
-| **选中文字后双击鼠标左键** | 光标旁弹出迷你浮窗查拼音（按钮与修饰键可改） |
-| **双击 `Ctrl`** | 唤起 / 前置首页（触发键可在设置里改） |
-| `Ctrl+Alt+P` | 抓取当前选中文字（可改为 Ctrl+Shift+P / Alt+Shift+P） |
-| `Ctrl+Alt+Q` | 退出程序 |
-| `Esc` | 隐藏到托盘（进程仍在，双击触发键随时唤回） |
-| `Ctrl+Enter` | 朗读当前内容 |
+点 `−` 收进托盘；托盘左键唤起首页、右键菜单有「⚙ 设置 / 退出」。
 
-窗口按钮（右上角，从右至左）：
+---
 
-| 按钮 | 作用 |
-| --- | --- |
-| `×` | **退出**程序（连托盘图标一起清理） |
-| `□` | 最大化 / 还原（最大化时保留标题栏，且不遮挡任务栏） |
-| `−` | **隐藏**到托盘，进程继续运行 |
+## 快捷键一览
 
-> 按住标题栏空白处拖动可以移动窗口；最大化状态下拖动自动禁用。
-> 窗口四边与四角还有 6px 的缩放热区，鼠标移上去会变成双向箭头，按住即可改大小。
+| 操作 | 默认 | 可改 | 说明 |
+| --- | --- | --- | --- |
+| 唤起首页 | 双击 `Ctrl` | ✅ 可换键或**留空禁用** | 两次间隔 < 400 ms 才算双击 |
+| 选中双击弹浮窗 | 鼠标左键双击 | ✅ 鼠标 / 键盘两种模式 | 键盘模式默认 `Shift`，不得与唤起键相同 |
+| 退出程序 | `Ctrl + Alt + Q` | ✅ 可留空禁用 | 也可以从托盘退出 |
+| 朗读 | `Ctrl + Enter` | ❌ | 焦点在浮窗内时有效 |
+| 隐藏到托盘 | `Esc` | ❌ | |
 
-迷你浮窗上从右往左是 `×` 关闭、`固定`、`朗读`、`复制`；点一个字只读这个字，多音字顺便切换读音。
+> 快捷键改成同一组合时会弹「该键与唤起快捷键冲突，是否互换？」——点确定交换，点取消原样保留。
 
-## 设置
+---
 
-两个入口，开着的是同一个窗口（单实例）：
+## 设置项
 
-- 托盘右键 → **设置**
-- 首页右下角**齿轮图标**
+设置窗口可从**首页右下角齿轮**、**右键菜单**、**托盘菜单**进入，四个分页可滚动。
 
-| 分组 | 内容 |
-| --- | --- |
-| 通用 | 启动时直接驻留托盘、窗口置顶、界面语言（预留）、拖动改大小、窗口最小宽高 |
-| 快捷键 | 双击唤起的按键、双击判定间隔（150–1000 ms）、抓取选中文字的热键、选中双击（开关/鼠标键/修饰键）、优先查询选区 |
-| 功能模块 | 剪贴板自动识别、汉字字号、朗读语速、朗读嗓音、点单字朗读、抓取不破坏剪贴板、标调方式、浮窗自动淡出、浮窗默认固定、界面主题 |
-| 关于 | 版本号、配置版本（`schemaVersion`）、配置目录、运行环境、项目主页 |
+**通用**
 
-底部三个按钮：**恢复默认 / 取消 / 保存**。保存后立刻生效并写入磁盘，重启后保留。
+| 设置 | 默认 | 说明 |
+| --- | --- | --- |
+| 启动时直接驻留托盘 | 关 | 不打首页，安静待在托盘 |
+| 窗口置顶 | 开 | 与标题栏图钉联动 |
+| 主题 | `Dark+` | 5 套配色，见下节 |
+| 背景色 | 跟随主题 | 可选覆盖，只改主背景，其余颜色自适应 |
+| 界面语言 | 简体中文 | 多语言预留 |
+| 拖动改变窗口大小 | 开 | 关闭后只能靠最小尺寸与字号间接控制 |
+| 窗口最小宽 / 高 | 320 / 200 px | 缩放下限 |
+
+**快捷键**：双击唤起键、双击判定间隔、选中双击开关 / 模式 / 按钮 / 修饰键 / 键盘功能键、退出热键。
+
+**功能模块**：15 个可选模块开关 + 手写识别引擎选择，另有字号、语速、嗓音、点字朗读、标调方式、过滤非中文、点浮窗外关闭、浮窗淡出与默认固定。
+
+**关于**：版本号、`schemaVersion`、配置目录、打开配置文件夹、项目主页。
+
+---
+
+## 主题与配色
+
+5 套配色集中在 `hanzi_pinyin.py` 的 `THEMES` 表里，加一套 = 加一条 dict：
+
+| 主题 | 风格 | 主背景 |
+| --- | --- | --- |
+| `Dark+`（默认） | VS Code Dark+ | `#1e1e1e` |
+| `Light+` | VS Code Light+ | `#ffffff` |
+| `Dark Blue` | Visual Studio Dark Blue | `#12212f` |
+| `Light Blue` | Visual Studio Light Blue | `#f5f9ff` |
+| `Monokai` | Monokai | `#272822` |
+
+- 保存设置即**就地重绘**，不用重启；
+- 「背景色」留空 = 跟随主题；填 `#rrggbb` 或用取色器选一个就行，面板色、悬停色、边框色会按明暗自适应，文字自动切黑/白。
+
+---
+
+## 可选功能模块
+
+首次启动会列一次，之后在「设置 → 功能模块」里随时改。**本期交付的是开关框架与入口**，功能本身按迭代逐个落地：
+
+| 功能 | 配置 key | 默认 |
+| --- | --- | --- |
+| 笔画顺序动画 | `stroke_animation` | 关 |
+| 字帖生成 | `stroke_practice_sheet` | 关 |
+| 生词本 + SRS | `srs_review` | 关 |
+| 拼写自测 / 听写 | `spelling_quiz` | 关 |
+| 声调五度图 | `tone_contour` | 关 |
+| 自定义读音词库 | `custom_pronunciation` | 关 |
+| 划词翻译 | `translate_on_select` | 关 |
+| HSK 等级 + 字频 | `hsk_frequency` | 关 |
+| Ruby 注音导出 | `ruby_export` | 关 |
+| 拼音反向查字 | `pinyin_reverse_lookup` | 关 |
+| 注音符号（ㄅㄆㄇ） | `bopomofo` | 关 |
+| 繁简 / 异体对照 | `variant_chars` | 关 |
+| 学习统计面板 | `learning_stats` | 关 |
+| 云同步生词本 | `cloud_sync` | 关 |
+| 手写功能 | `handwriting` | **开** |
+
+未启用的模块不加载依赖、不显示入口；新增一个模块只需在 `MODULES` 里加一行。
+
+---
 
 ## 配置文件
 
-首次运行后生成：
+位置（首次运行自动生成）：
 
 - Windows：`%APPDATA%\HanziPinyinPopup\config.json`
 - macOS：`~/Library/Application Support/HanziPinyinPopup/config.json`
 - Linux：`~/.config/HanziPinyinPopup/config.json`
 
-写入采用「临时文件 + fsync + 原子替换」，断电或强杀不会留下半截文件。
+写入是原子的（临时文件 + `fsync` + `os.replace`），断电不会写坏。字段含义见 [`config.sample.json`](config.sample.json)，当前 `schemaVersion = 4`。旧配置启动时自动迁移（补默认值、清掉已废弃的 `hotkey`、把 `dark/light` 映射到 `dark_plus/light_plus`）。
 
-| 字段 | 默认值 | 说明 |
+主要字段：
+
+| 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `schemaVersion` | `3` | 配置版本，用于升级迁移 |
-| `start_hidden` | `false` | 启动后只驻留托盘，不弹窗 |
-| `always_on_top` | `true` | 是否置顶 |
-| `resize_enabled` | `true` | 允许拖动边缘改大小 |
-| `resize_pad` | `6` | 边缘缩放热区厚度（px） |
-| `min_width` / `min_height` | `320` / `200` | 缩放的下限 |
-| `trigger_key` | `"ctrl"` | 双击唤起的按键（`ctrl`/`alt`/`shift`/`space`/`tab`/`f1`…`f12`） |
-| `double_click_ms` | `400` | 双击判定间隔（毫秒，150–1000） |
-| `hotkey` | `"<ctrl>+<alt>+p"` | 抓取选区热键，[pynput 语法](https://pynput.readthedocs.io/en/latest/keyboard.html#global-hotkeys) |
-| `quit_hotkey` | `"<ctrl>+<alt>+q"` | 退出热键 |
-| `select_double_popup` | `true` | 选中文字后双击弹迷你浮窗 |
-| `select_double_button` | `"left"` | `left` / `right` / `middle` |
-| `select_double_modifier` | `"none"` | `none` / `ctrl` / `alt` / `shift` |
-| `trigger_prefers_selection` | `false` | 双击触发键时有选区则弹浮窗而不是首页 |
-| `auto_clipboard` | `false` | 打开后，剪贴板出现汉字就自动显示拼音 |
-| `font_size` | `32` | 汉字字号（像素近似值） |
-| `speech_rate` | `0` | 语速，`-10` ~ `10` |
-| `tts_voice` | `"auto"` | `auto` / `female` / `male` / 具体 SAPI 嗓音名 |
-| `read_char_on_click` | `true` | 点单字只读这个字 |
+| `schemaVersion` | `4` | 配置版本，升级时用于迁移 |
+| `theme` / `theme_background` | `dark_plus` / `null` | 主题与可选背景覆盖 |
+| `always_on_top` | `true` | 置顶状态（图钉联动） |
+| `trigger_key` | `ctrl` | 双击唤起的键，空字符串 = 禁用 |
+| `double_click_ms` | `400` | 双击判定窗口 |
+| `quit_hotkey` | `<ctrl>+<alt>+q` | 退出热键，空字符串 = 禁用 |
+| `select_double_popup` | `true` | 选中双击弹浮窗 |
+| `select_double_mode` | `mouse` | `mouse` / `key` |
+| `select_double_button` | `left` | `left` / `right` / `middle` |
+| `select_double_modifier` | `none` | `none` / `ctrl` / `alt` / `shift` |
+| `select_double_key` | `shift` | 键盘模式的功能键，须 ≠ `trigger_key` |
+| `trigger_prefers_selection` | `false` | 唤起时若有选区，直接弹迷你浮窗 |
+| `filter_non_han` | `true` | 只对中文与标点注音 |
+| `popup_dismiss_on_outside_click` | `true` | 点迷你浮窗外自动关闭 |
+| `mini_popup_auto_hide_ms` | `4000` | 淡出延时，0 = 不自动消失 |
+| `mini_popup_pinned` | `false` | 迷你浮窗默认固定 |
+| `tone_style` | `symbol` | `symbol` / `num` / `none` |
+| `font_size` | `32` | 汉字字号（pt） |
+| `speech_rate` | `0` | 语速 -10 ~ 10 |
+| `tts_voice` | `auto` | `auto` / `female` / `male` / 具体嗓音名 |
+| `read_char_on_click` | `true` | 点单字朗读 |
 | `preserve_clipboard` | `true` | 抓取选区后还原剪贴板 |
-| `tone_style` | `"symbol"` | `symbol` / `num` / `none` |
-| `theme` | `"dark"` | `dark` / `light`（切换后重启生效） |
-| `mini_popup_auto_hide_ms` | `4000` | 浮窗停留时长，0 = 不自动消失 |
-| `mini_popup_pinned` | `false` | 浮窗默认固定 |
-| `window_width` / `window_height` | `420` / `200` | 窗口尺寸，拖动或隐藏时自动记录 |
-| `position` | `null` | 窗口位置，隐藏/退出时自动记录 |
-
-## 常见问题
-
-**双击 Ctrl 没反应？**
-
-1. 先看托盘图标在不在——在就说明程序活着，多半是按键被别的软件抢走了（截图工具、录屏、输入法都可能）。去设置里换一个触发键（比如双击 `Alt`）试试。
-2. 有的安全软件会拦截全局键盘监听，需要放行本程序。
-3. macOS 需要在「系统设置 → 隐私与安全性 → 辅助功能」里授权；Wayland 下全局监听受限，建议切到 X11 会话。
-
-**托盘图标不见了？**
-
-程序启动时如果托盘初始化失败，会把窗口直接显示出来并在控制台打印原因（用 `python hanzi_pinyin.py` 前台运行可以看到）。Linux 下通常是缺 AppIndicator 依赖。
-
-**选中文字后双击没反应？**
-
-1. 先确认「设置 → 快捷键 → 选中双击弹浮窗」是开着的；
-2. 这个功能依赖 `uiautomation`（`pip install -r requirements.txt` 会一起装）。没装或控件不暴露文本接口时，双击不会触发——这是刻意的：宁可不动，也不要在资源管理器里双击时替你按 `Ctrl+C` 把文件复制走；
-3. 如果和你常用软件的双击手势撞了，可以在设置里给这个手势加一个修饰键（按住 `Ctrl`/`Alt`/`Shift` 再双击）；
-4. 兜底路径只在光标确实落在文本控件上时才启用。
-
-**想让双击 Ctrl 直接查选中的词？**
-
-打开「设置 → 快捷键 → 优先查询选区」：有选区时双击触发键弹迷你浮窗，没选区时照旧唤起首页。
-
-**拖不到窗口边缘改大小？**
-
-窗口边缘只有 6px 的热区，最大化状态下会禁用。嫌难点可以把 `config.json` 里的 `resize_pad` 调大到 8~10。
-
-**朗读没有男声？**
-
-Windows 默认只装了一两个嗓音（通常只有女声）。去「设置 → 时间和语言 → 语音 → 添加语音」装一个中文语音包，回到「设置 → 功能模块 → 朗读嗓音」就能选到具体嗓音。
-
-**点朗读没声音？**
-
-Windows 首次调用 SAPI 有 0.5 秒左右启动延迟，属正常。若完全无声，检查系统默认播放设备，或在「设置 → 时间和语言 → 语音」里确认已安装中文语音包。
-
-**识别出来的字不对？**
-
-识别由系统手写引擎负责，尽量写大、写正、按标准笔顺。候选不对就在手写面板里点其他候选，或退回用输入法的 U 模式。
-
-**多音字标错了？**
-
-单字无法判断语境（"行"默认 xíng，"银行"才是 háng）。输入词组即可，工具会把整串一起送进词典消歧。多音字行里也列出了其他读音。
-
-**杀毒软件报毒？**
-
-程序用 `pynput` 做全局按键监听、用 PowerShell 调系统语音，这两点容易触发启发式误报。代码全部开源，可自行审阅；也可以在设置里关掉相关功能来避开。
-
-## 工作原理
-
-```
-输入框内容 ──► pypinyin（整串送词典消歧）──► 逐字渲染音标 + 多音字
-     ▲
-     ├── 系统手写 / 输入法 / 粘贴
-     └── Ctrl+Alt+P ──► 模拟 Ctrl+C ──► 读剪贴板
-
-双击触发键 ──► pynput 监听线程 ──► 队列 ──► Tk 主线程唤起窗口
-托盘菜单  ──► pystray 线程    ──► 队列 ──┘
-```
-
-- 界面：`tkinter`（标准库，无额外 GUI 依赖），无边框 + 自绘标题栏
-- 拼音：`pypinyin`（MIT）
-- 托盘：`pystray` + `Pillow`（图标运行时绘制，不依赖图片资源）
-- 全局按键：`pynput`
-- 剪贴板：`pyperclip`
-- 读选区：Windows `uiautomation`（TextPattern），读不到再走剪贴板备份还原
-- 朗读：Windows 下常驻一个 PowerShell `System.Speech` 进程（文本走 base64 传输，避开控制台编码问题），其他平台走系统命令
-
-> 托盘线程、键盘监听、鼠标监听都不直接碰 Tk —— 它们把回调塞进队列，由主线程每 60 ms 取一次执行，避免 `main thread is not in main loop`。
-> UI Automation 的 COM 初始化是按线程的，所以读选区一律在刚起的短线程里做，读完再 `post()` 回主线程。
-
-## 开发
-
-核心只有一个文件，改起来没有负担：
-
-```bash
-python hanzi_pinyin.py --selftest        # 不启动界面，验证拼音与配置
-python hanzi_pinyin.py --text 重庆银行    # 启动时预填内容
-python hanzi_pinyin.py --hidden          # 启动后只驻留托盘
-python hanzi_pinyin.py --version
-```
-
-### 加一个设置项
-
-`SETTING_GROUPS` 是声明式的：往对应分组里加一条 dict，再在 `DEFAULT_CONFIG` 里加一条默认值，设置界面、保存、校验、恢复默认都会自动带上它，不用改主流程。
-
-```python
-{"key": "my_option", "label": "我的开关", "type": "bool", "hint": "说明文字"}
-```
-
-支持的 `type`：`bool` / `int`（带 `min`/`max`/`step`/`suffix`）/ `choice`（带 `choices=[(显示名, 存储值)]`，可选 `readonly`）。
-
-### 升级配置结构
-
-1. `CONFIG_SCHEMA` +1；
-2. 在 `migrate()` 里补一段 `if v < N: ...` 的转换；
-3. 老配置会在下次启动时自动升级。
-
-### 迭代方式
-
-每次迭代都在 `开发文档.md` 里写需求（结构：目标 / 范围 / 用户故事与验收 / 设置架构 / 技术约束 / 任务拆分），做完后归档到 `开发文档归档文件夹/第N次开发文档.md`，再把 `开发文档.md` 换成下一次的待办模板。规则见 [开发规范.md](开发规范.md)。
-
-欢迎提 Issue / PR。想加的方向：
-
-- [x] 托盘图标 / 双击唤起 / 统一设置界面
-- [x] 拖动改变窗口大小（八向热区）
-- [x] 选中文字双击弹迷你浮窗 / 贴光标定位 / 固定 / 超时淡出
-- [x] 朗读嗓音可选、点单字朗读、抓取选区不破坏剪贴板
-- [x] 标调方式切换（符号 / 数字 / 无声调）、多音字点击切换
-- [ ] 生词本与历史记录
-- [ ] 部首、笔画数、简单释义（接 CC-CEDICT）
-- [ ] 开机自启（Windows 注册表 / macOS LaunchAgent / Linux autostart）
-- [ ] 整段批量转拼音 + 导出
-- [ ] 多语言界面（配置里已留 `language` 字段）
-- [ ] 内置手写板（直接调 Windows Ink 引擎，省掉切换输入法这一步）
-
-## 许可证
-
-[MIT](LICENSE)。拼音数据来自 [pypinyin](https://github.com/mozillazg/python-pinyin)（MIT）。
+| `auto_clipboard` | `false` | 剪贴板出现中文时自动弹窗 |
+| `handwriting_engine` | `system` | `system` / `offline` |
+| `modules` | 见上表 | 15 个模块开关 |
+| `first_run` | `true` | 首启引导是否还没走 |
+| `resize_enabled` / `resize_pad` | `true` / `6` | 边缘缩放开关与热区厚度 |
+| `min_width` / `min_height` | `320` / `200` | 缩放下限 |
+| `window_width` / `window_height` / `position` | 运行时记忆 | 上次的尺寸与位置 |
 
 ---
 
-<sub>拼音数据来自 pypinyin；如果你fork了本项目，记得把 `LICENSE`、`README` 和 `PROJECT_URL` 换成自己的仓库地址。</sub>
+## 项目结构
+
+```
+hanzi_pinyin.py            # 单文件应用（解析 / 界面 / 托盘 / 手写 / 主题）
+config.sample.json         # 配置示例（唯一的配置文件范例，真实配置不入库）
+requirements.txt
+start.bat / run.sh         # Windows / Unix 启动脚本
+docs/                      # 截图
+开发文档.md                # 当前迭代需求（单一事实来源）
+开发规范.md                # 常驻开发规范
+开发文档归档文件夹/        # 历次开发文档与阶段总结
+```
+
+## 实现要点
+
+几个踩过的坑，写在这里省得下次再踩：
+
+- **Tk 的 grab 是窗口级的**：`widget.grab_set()` 之后必须用 `grab_current().grab_release()` 解，`root.grab_release()` 解不掉；否则一个 6 px 的缩放热区会把后续所有鼠标事件吞掉。
+- **拖动必须自己 grab**：不抓指针，鼠标一离开标题栏就收不到 `<B1-Motion>`。
+- **Tk 不裁剪子控件**：布局算错就是"画到窗口外面"，不会报错。
+- **Font 用负号表示像素**：正数字号会再乘一次系统缩放，`measure()` 和实际绘制对不上。
+- **CJK 字体的 Label 高度 ≠ linespace**：默认 `bd`/`highlightthickness` 会多出几像素，拼音会和汉字叠在一起；渲染时显式 `bd=0, highlightthickness=0, padx=0, pady=0`。
+- **Tk 在 Windows 上不渲染 emoji**：📌⚙🔊 都是空白，图标统一用 Pillow 现画再 `ImageTk`。
+- **深色主题下 `OptionMenu` 的箭头是个白方块**，`Spinbox` 的按钮也发白：下拉改成自绘三角 + `tk.Menu`。
+- **UI Automation 的 COM 必须按线程初始化**（`InitializeUIAutomationInCurrentThread`），并且只在文本控件上允许 `Ctrl+C` 兜底——否则在资源管理器里双击会变成复制文件。
+- **跨线程回调一律走队列**：托盘、键盘、鼠标监听都在别的线程，`root.after` 轮询把回调搬回主线程；退出前 `after_cancel` 掉所有 job，否则控制台会刷 `invalid command name`。
+- **配置原子写**：临时文件 + `flush` + `fsync` + `os.replace`。
+
+## 已知限制
+
+- **只重点验证了 Windows 10/11**：图钉、手写、SAPI 朗读、UIA 读选区都是 Windows 路径；macOS / Linux 有对应代码分支但未实测。
+- **15 个可选模块目前只有开关框架**，打开开关不会变出新界面，功能按后续迭代交付。
+- **手写识别用的是系统面板**：Windows 11 已移除 Tablet PC 的 `MSINKAUTLib` COM 组件，WinRT 的 `InkRecognizerContainer` 又无法在 PowerShell 5.1 里取回异步结果，所以内置画板负责"写"，识别交给系统手写面板（同一个微软识别器）。离线 ONNX 引擎的接口留好了，但本期没有随包提供模型。
+- **朗读嗓音取决于系统装了什么**：只有中文女声时，「男声优先」会退回女声。
+- **抓取选区依赖 UI Automation**：个别老程序（自绘控件、部分游戏）读不到，此时选中双击不会弹窗。
+
+---
+
+## 路线图
+
+- [x] v1.0.1 托盘常驻 · 双击唤起 · 自定义标题栏 · 统一设置 · 配置迁移
+- [x] v1.1.0 八向缩放 · 选中双击迷你浮窗 · 嗓音与标调 · 多音字点击
+- [x] v1.2.0 齿轮图标 · 5 套主题 + 背景覆盖 · 图钉置顶 · 快捷键重构 · 首启引导与模块框架 · 手写板 · 非中文过滤 · 点浮窗外关闭
+- [ ] v1.3.x 把 15 个模块逐个落地（先做笔画动画、生词本 SRS、声调图）
+- [ ] 离线手写模型（CASIA-HWDB 训练）替换系统面板依赖
+- [ ] 设置界面内直接预览主题色板
+
+---
+
+## 开发与迭代
+
+本项目按 **小步敏捷迭代** 推进，每一轮的约定写在 [`开发规范.md`](开发规范.md) 里：
+
+- 需求文档 `开发文档.md` 完成后归档到 `开发文档归档文件夹/第N次开发文档.md`，再重生成为下一轮模板；
+- 配置结构变化必须 `schemaVersion + 1` 并补 `migrate()`；
+- 提交信息关联用户故事编号（`feat: US13 ...`），每个里程碑打 tag 推到 GitHub；
+- 只提交 `config.sample.json`，真实配置与虚拟环境不入库。
+
+跑一遍不启动界面的自检（拼音、过滤、主题、模块、迁移全部覆盖）：
+
+```bash
+python hanzi_pinyin.py --selftest
+```
+
+---
+
+## 许可证
+
+[MIT](LICENSE) © 2026 LVE0CL
+
+字库与拼音数据来自 [pypinyin](https://github.com/mozillazg/python-pinyin)，朗读走系统 SAPI，均不联网。
