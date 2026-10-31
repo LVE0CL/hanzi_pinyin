@@ -65,7 +65,9 @@ def load_task(task_id: str) -> dict:
 
 
 def changed_paths() -> list:
-    _, out = git("status", "--porcelain")
+    # core.quotepath=false：不然中文文件名会被转义成 \345\274\200 这种八进制，
+    # git add 时就找不到文件（本项目根目录就有中文名的开发文档）。
+    _, out = git("-c", "core.quotepath=false", "status", "--porcelain")
     paths = []
     for line in out.splitlines():
         if not line.strip():
