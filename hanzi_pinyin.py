@@ -102,7 +102,15 @@ from hpp.constants import (
     single_instance_port,
 )
 from hpp.hotkeys import MouseDoubleClickListener, TriggerKeyListener
-from hpp.icons import make_app_image, make_gear_image, make_pin_image
+from hpp.features import (
+    annotate_all,
+    attach_all,
+    build_panels,
+    collect_self_checks,
+    load_features,
+    notify_text,
+)
+from hpp.icons import make_app_image
 from hpp.modules import MODULES, default_modules
 from hpp.pinyin import analyze, filter_text, pinyin_pairs, pinyin_plain
 from hpp.selection import (
@@ -121,21 +129,14 @@ from hpp.theme import (
 )
 from hpp.ui import (
     PLACEHOLDER,
+    BottomBar,
     FirstRunWindow,
     HandwritingPad,
     MiniPopup,
+    ResizeZones,
     RubyView,
     SettingsWindow,
-    _release_grab,
-)
-from hpp.ui import (
-    PLACEHOLDER,
-    FirstRunWindow,
-    HandwritingPad,
-    MiniPopup,
-    RubyView,
-    SettingsWindow,
-    _release_grab,
+    TitleBar,
 )
 
 
@@ -190,6 +191,8 @@ class HanziPopup:
 
         self._set_window_icon()
         self._build_fonts()
+        # 功能模块要在建界面之前就位：面板是界面的一部分
+        self._load_features()
         self._build_ui()
         self._bind_events()
         self._poll_ui()
@@ -265,6 +268,7 @@ class HanziPopup:
         self.font_hint = tkfont.Font(family=self.cn_font, size=-px(8))
 
     # ---------------- 布局 ----------------
+    # ---------------- 布局 ----------------
     def _build_ui(self) -> None:
         c = self.colors
         self.outer = tk.Frame(
@@ -273,35 +277,8 @@ class HanziPopup:
         )
         self.outer.pack(fill="both", expand=True)
 
-        # ---- 自定义标题栏（可拖动区域）----
-        self.bar = tk.Frame(self.outer, bg=c["panel"], height=34)
-        self.bar.pack(fill="x", side="top")
-        self.bar.pack_propagate(False)
-
-        self.title = tk.Label(self.bar, text=APP_TITLE, bg=c["panel"],
-                              fg=c["fg_dim"], font=self.font_ui)
-        self.title.pack(side="left", padx=(12, 0))
-
-        self.btn_close = self._title_button(self.bar, "×", self.quit, danger=True, big=True)
-        self.btn_close.pack(side="right", padx=(0, 8))
-        self.btn_max = self._title_button(self.bar, "□", self.toggle_maximize, big=True)
-        self.btn_max.pack(side="right", padx=2)
-        self.btn_min = self._title_button(self.bar, "−", self.hide_to_tray, big=True)
-        self.btn_min.pack(side="right", padx=2)
-        # US14：图钉紧挨在「−」左侧，点击切换始终置顶
-        self.btn_pin = self._pin_button(self.bar)
-        self.btn_pin.pack(side="right", padx=(2, 4))
-
-        self.btn_copy = self._title_button(self.bar, "复制", self.copy_pinyin)
-        self.btn_copy.pack(side="right", padx=(2, 10))
-        self.btn_speak = self._title_button(self.bar, "朗读", self.speak_current)
-        self.btn_speak.pack(side="right", padx=2)
-
-        for w in (self.bar, self.title):
-            w.bind("<ButtonPress-1>", self._start_drag)
-            w.bind("<B1-Motion>", self._do_drag)
-            w.bind("<ButtonRelease-1>", self._end_drag)
-            w.bind("<Button-3>", self._popup_menu)
+        # ---- 标题栏（自带拖动与复制/朗读/图钉/最小化/最大化/关闭）----
+        self.titlebar = TitleBar(self, self.outer)
 
         # ---- 输入框 ----
         self.entry_wrap = tk.Frame(self.outer, bg=c["entry_bg"])
@@ -353,32 +330,24 @@ class HanziPopup:
         )
         self.multi.pack(fill="x", padx=14)
 
-        # ---- 底部：提示 + 设置入口（圆圈1）----
-        bottom = tk.Frame(self.outer, bg=c["panel"])
-        bottom.pack(fill="x", padx=12, pady=(2, 8))
+        # ---- 功能模块的内嵌面板（S4）：一个都没有时整块不占位置 ----
+        self.feature_host = tk.Frame(self.outer, bg=c["panel"])
+        self.feature_panels = build_panels(self.features, self.feature_host)
+        if self.feature_panels:
+            self.feature_host.pack(fill="x", padx=12, pady=(0, 4))
 
-        self.hint = tk.Label(
-            bottom, text=self._hint_text(), bg=c["panel"], fg=c["fg_dim"],
-            font=self.font_hint, anchor="w",
-        )
-        self.hint.pack(side="left", padx=(2, 0))
+        # ---- 底部：提示 + 手写入口 + 设置齿轮 ----
+        self.bottom = BottomBar(self, self.outer)
+        self.bottom.set_default(self._hint_text())
 
-        self.btn_settings = self._gear_button(bottom)
-        self.btn_settings.pack(side="right", padx=(6, 2))
+        self._build_menu()
+        for w in (self.outer, self.bottom.hint, self.multi):
+            w.bind("<Button-3>", self._popup_menu)
 
-        # US12：手写入口只在模块开启时出现
-        self.btn_hand = None
-        if self.module_enabled("handwriting"):
-            self.btn_hand = tk.Label(
-                bottom, text="手写", bg=c["panel"], fg=c["fg_dim"],
-                font=self.font_hint, padx=6, cursor="hand2",
-            )
-            self.btn_hand.pack(side="right", padx=(6, 2))
-            self.btn_hand.bind("<Button-1>", lambda _e: self.open_handwriting())
-            self.btn_hand.bind("<Enter>", lambda _e: self.btn_hand.configure(fg=c["accent"]))
-            self.btn_hand.bind("<Leave>", lambda _e: self.btn_hand.configure(fg=c["fg_dim"]))
+        # ---- US5：8 向缩放热区（浮在最上层，只占几像素边缘）----
+        self.zones = ResizeZones(self, self.outer)
 
-        # ---- 右键菜单 ----
+    def _build_menu(self) -> None:
         self.menu = tk.Menu(self.root, tearoff=0)
         self.menu.add_command(label="⚙ 设置…", command=self.open_settings)
         self.menu.add_command(label="手写板…", command=self.open_handwriting)
@@ -390,121 +359,37 @@ class HanziPopup:
         self.menu.add_separator()
         self.menu.add_command(label="退出", command=self.quit)
 
-        for w in (self.outer, self.hint, self.multi):
-            w.bind("<Button-3>", self._popup_menu)
+    # ---------------- 功能模块（S4）----------------
+    def _load_features(self) -> None:
+        """按当前模块开关重新加载功能模块（设置里改开关后要重来一遍）。"""
+        self.features = load_features(self.cfg)
+        attach_all(self.features, self)
 
-        self._build_resize_zones()
+    def reload_features(self) -> None:
+        """给外部（首启引导 / 设置窗口）用：开关变了，重载模块并重画界面。"""
+        self._load_features()
+        self.rebuild_ui()
 
-    # ---------------- US5：8 向缩放热区 ----------------
-    RESIZE_CURSORS = {
-        "n": "sb_v_double_arrow", "s": "sb_v_double_arrow",
-        "e": "sb_h_double_arrow", "w": "sb_h_double_arrow",
-        "nw": "size_nw_se", "se": "size_nw_se",
-        "ne": "size_ne_sw", "sw": "size_ne_sw",
-    }
+    # ---------------- 兼容属性 ----------------
+    # 主窗口重画后控件对象会换新的，用属性取而不是缓存引用，
+    # 外部（含验收脚本）按这些名字拿到的永远是当前这一份。
+    @property
+    def bar(self):
+        return self.titlebar.bar
 
-    def _build_resize_zones(self) -> None:
-        """在窗口四周贴一圈透明感的热区，鼠标移上去变双向箭头，按住即可改大小。
+    @property
+    def btn_pin(self):
+        return self.titlebar.btn_pin
 
-        热区浮在所有控件之上（place 后创建即置顶），但只占几像素边缘，
-        正中间留给标题栏拖动和正文点击，两者不冲突。
-        """
-        pad = max(3, int(self.cfg.get("resize_pad", 6)))
-        self._zones = {}
-        for name in ("n", "s", "w", "e", "nw", "ne", "sw", "se"):
-            frame = tk.Frame(self.outer, bg=self.colors["panel"], cursor=self.RESIZE_CURSORS[name])
-            frame.bind("<ButtonPress-1>", lambda e, n=name: self._resize_start(e, n))
-            frame.bind("<B1-Motion>", self._resize_drag)
-            frame.bind("<ButtonRelease-1>", self._resize_end)
-            self._zones[name] = (frame, pad)
-        self._layout_resize_zones()
-        self._sync_resize_zones()
+    @property
+    def btn_settings(self):
+        return self.bottom.btn_settings
 
-    def _layout_resize_zones(self) -> None:
-        pad = max(3, int(self.cfg.get("resize_pad", 6)))
-        # name: (relx, rely, anchor, width, height, x, y)；width/height 为 None 表示拉伸到边
-        spec = {
-            "n":  (0, 0, "nw", None, pad, 0, 0),
-            "s":  (0, 1, "sw", None, pad, 0, -pad),
-            "w":  (0, 0, "nw", pad, None, 0, 0),
-            "e":  (1, 0, "ne", pad, None, 0, 0),
-            "nw": (0, 0, "nw", pad * 2, pad * 2, 0, 0),
-            "ne": (1, 0, "ne", pad * 2, pad * 2, 0, 0),
-            "sw": (0, 1, "sw", pad * 2, pad * 2, 0, 0),
-            "se": (1, 1, "se", pad * 2, pad * 2, 0, 0),
-        }
-        for name, (frame, _old) in self._zones.items():
-            relx, rely, anchor, w, h, x, y = spec[name]
-            frame.place(
-                relx=relx, rely=rely, anchor=anchor, x=x, y=y,
-                width=w, height=h,
-                relwidth=1.0 if w is None else None,
-                relheight=1.0 if h is None else None,
-            )
-            self._zones[name] = (frame, pad)
+    @property
+    def btn_hand(self):
+        return self.bottom.btn_hand
 
-    def _sync_resize_zones(self) -> None:
-        """最大化时或用户关掉缩放时，把热区藏起来。"""
-        show = bool(self.cfg.get("resize_enabled", True)) and not self._maximized
-        if show:
-            # place_forget 之后必须重新 place 才能回来
-            self._layout_resize_zones()
-            for frame, _pad in self._zones.values():
-                frame.lift()
-        else:
-            for frame, _pad in self._zones.values():
-                frame.place_forget()
 
-    def _resize_start(self, event, name: str) -> None:
-        if self._maximized or not self.cfg.get("resize_enabled", True):
-            return
-        self._resize_mode = name
-        self._resize_origin = (
-            event.x_root, event.y_root,
-            self.root.winfo_width(), self.root.winfo_height(),
-            self.root.winfo_x(), self.root.winfo_y(),
-        )
-        # 热区只有几像素宽，抓住指针才能一路跟到松开
-        try:
-            event.widget.grab_set()
-        except Exception:
-            pass
-
-    def _resize_drag(self, event) -> None:
-        if not self._resize_mode or not self._resize_origin:
-            return
-        sx, sy, w0, h0, x0, y0 = self._resize_origin
-        dx, dy = event.x_root - sx, event.y_root - sy
-        min_w = max(160, int(self.cfg.get("min_width", 320)))
-        min_h = max(120, int(self.cfg.get("min_height", 200)))
-
-        w, h, x, y = w0, h0, x0, y0
-        mode = self._resize_mode
-        if "e" in mode:
-            w = max(min_w, w0 + dx)
-        if "s" in mode:
-            h = max(min_h, h0 + dy)
-        if "w" in mode:
-            w = max(min_w, w0 - dx)
-            x = x0 + (w0 - w)
-        if "n" in mode:
-            h = max(min_h, h0 - dy)
-            y = y0 + (h0 - h)
-
-        self.width, self.height = int(w), int(h)
-        self.root.geometry(f"{self.width}x{self.height}+{x}+{y}")
-
-    def _resize_end(self, _event=None) -> None:
-        if not self._resize_mode:
-            self._release_grab()
-            return
-        self._resize_mode = None
-        self._resize_origin = None
-        self._release_grab()
-        self.cfg["window_width"] = int(self.width)
-        self.cfg["window_height"] = int(self.height)
-        save_config(self.cfg)
-        self.refresh()
 
     def _hint_text(self) -> str:
         key = self.cfg.get("trigger_key", "ctrl")
@@ -513,77 +398,12 @@ class HanziPopup:
         label = TRIGGER_LABELS.get(key, "Ctrl")
         return f"双击 {label} 唤起 · Esc 隐藏 · Ctrl+Enter 朗读"
 
-    def _title_button(self, master, text, cmd, danger=False, big=False) -> tk.Label:
-        c = self.colors
-        lbl = tk.Label(master, text=text, bg=c["panel"], fg=c["fg_dim"],
-                       font=self.font_ctrl if big else self.font_ui,
-                       padx=8, cursor="hand2")
-        hover_fg = c["danger"] if danger else c["fg"]
-        lbl.bind("<Button-1>", lambda _e: cmd())
-        lbl.bind("<Enter>", lambda _e: lbl.configure(bg=c["hover"], fg=hover_fg))
-        lbl.bind("<Leave>", lambda _e: lbl.configure(bg=c["panel"], fg=c["fg_dim"]))
-        return lbl
-
-    def _pin_button(self, master) -> tk.Label:
-        """US14：置顶图钉。钉住 = 实心 + 强调色，松开 = 描边。"""
-        c = self.colors
-        lbl = tk.Label(master, bg=c["panel"], cursor="hand2", padx=7, pady=2)
-        lbl._images = {}
-        try:
-            for state in ("on", "off", "hover"):
-                if state == "on":
-                    img = make_pin_image(16, c["accent"], filled=True)
-                elif state == "off":
-                    img = make_pin_image(16, c["fg_dim"], filled=False)
-                else:
-                    img = make_pin_image(16, c["fg"], filled=bool(
-                        self.cfg.get("always_on_top", True)))
-                photo = ImageTk.PhotoImage(img)
-                lbl._images[state] = photo
-                self._image_refs.append(photo)
-            lbl.configure(image=lbl._images["on" if self.cfg.get("always_on_top", True) else "off"])
-        except Exception:
-            lbl.configure(text="钉", fg=c["fg_dim"], font=self.font_ui)
-        lbl.bind("<Button-1>", lambda _e: self.toggle_topmost())
-        lbl.bind("<Enter>", lambda _e: lbl.configure(
-            image=lbl._images["hover"], bg=c["hover"]))
-        lbl.bind("<Leave>", lambda _e: (lbl.configure(bg=c["panel"]), self._refresh_pin()))
-        return lbl
-
-    def _refresh_pin(self) -> None:
-        lbl = getattr(self, "btn_pin", None)
-        if lbl is None:
-            return
-        images = getattr(lbl, "_images", None) or {}
-        key = "on" if self.cfg.get("always_on_top", True) else "off"
-        if key in images:
-            try:
-                lbl.configure(image=images[key])
-            except Exception:
-                pass
 
     def module_enabled(self, key: str) -> bool:
         """US11：模块开关统一从这里读，未启用的模块不显示入口。"""
         mods = self.cfg.get("modules") or {}
         return bool(mods.get(key, False))
 
-    def _gear_button(self, master) -> tk.Label:
-        c = self.colors
-        try:
-            normal = ImageTk.PhotoImage(make_gear_image(18, c["fg_dim"]))
-            hover = ImageTk.PhotoImage(make_gear_image(18, c["accent"]))
-            self._image_refs.extend([normal, hover])
-            lbl = tk.Label(master, image=normal, bg=c["panel"], cursor="hand2",
-                           padx=4, pady=2)
-            lbl.bind("<Enter>", lambda _e: lbl.configure(image=hover, bg=c["hover"]))
-            lbl.bind("<Leave>", lambda _e: lbl.configure(image=normal, bg=c["panel"]))
-        except Exception:
-            lbl = tk.Label(master, text="设置", bg=c["panel"], fg=c["fg_dim"],
-                           font=self.font_hint, cursor="hand2", padx=6)
-            lbl.bind("<Enter>", lambda _e: lbl.configure(fg=c["accent"]))
-            lbl.bind("<Leave>", lambda _e: lbl.configure(fg=c["fg_dim"]))
-        lbl.bind("<Button-1>", lambda _e: self.open_settings())
-        return lbl
 
     # ---------------- 事件 ----------------
     def _bind_events(self) -> None:
@@ -609,29 +429,6 @@ class HanziPopup:
         self._sync_placeholder()
         return "break"
 
-    def _start_drag(self, event) -> None:
-        if self._maximized:
-            return
-        self._drag_origin = (event.x_root - self.root.winfo_x(),
-                             event.y_root - self.root.winfo_y())
-        # 拖动时鼠标很容易跑出标题栏，抓住指针才能持续收到 <B1-Motion>
-        try:
-            event.widget.grab_set()
-        except Exception:
-            pass
-
-    def _do_drag(self, event) -> None:
-        if self._maximized:
-            return
-        x = event.x_root - self._drag_origin[0]
-        y = event.y_root - self._drag_origin[1]
-        self.root.geometry(f"+{x}+{y}")
-
-    def _end_drag(self, _event=None) -> None:
-        _release_grab(self.root)
-
-    def _release_grab(self) -> None:
-        _release_grab(self.root)
 
     def _popup_menu(self, event) -> None:
         try:
@@ -708,6 +505,8 @@ class HanziPopup:
         self.canvas.yview_moveto(0)
         items = analyze(text, self.cfg.get("tone_style", "symbol"),
                         bool(self.cfg.get("filter_non_han", True)))
+        # S4：模块先给每个字补信息（比如声调数字），再交给注音视图画
+        items = annotate_all(self.features, items)
         self.ruby_view.set_items(items)
 
         multi_lines = [
@@ -716,11 +515,16 @@ class HanziPopup:
         ]
         self.multi.configure(text="　".join(multi_lines[:3]) if multi_lines else "")
         self._update_geometry()
+        # 渲染完再通知面板，此时几何已经算好，面板可以按需改动高度
+        notify_text(self.features, text, items)
 
     def _update_geometry(self) -> None:
         if self._maximized:
             wx, wy, ww, wh = work_area(self.root)
-            chrome = 34 + 46 + 26 + 34  # 标题栏 + 输入框 + 多音字 + 底部
+            # 标题栏 + 输入框 + 多音字 + 底部，再算上功能模块面板的高度
+            chrome = 34 + 46 + 26 + 34
+            if self.feature_panels:
+                chrome += self.feature_host.winfo_reqheight()
             self.canvas.configure(height=max(80, wh - chrome))
             self.root.geometry(f"{ww}x{wh}+{wx}+{wy}")
             # 最大化时把内容垂直居中，避免一大片空白压在下方
@@ -783,22 +587,14 @@ class HanziPopup:
         self._flash_hint("已复制「字 + 拼音」")
 
     def _flash_hint(self, msg: str) -> None:
-        old = self._hint_text()
-        self.hint.configure(text=msg, fg=self.colors["accent"])
-        if self._hint_job is not None:
-            try:
-                self.root.after_cancel(self._hint_job)
-            except Exception:
-                pass
-        self._hint_job = self.root.after(
-            1400, lambda: self.hint.configure(text=old, fg=self.colors["fg_dim"]))
+        self.bottom.flash(msg)
 
     def toggle_topmost(self) -> None:
         new = not bool(self.root.attributes("-topmost"))
         self.root.attributes("-topmost", new)
         self.cfg["always_on_top"] = new
         save_config(self.cfg)
-        self._refresh_pin()
+        self.titlebar.refresh_pin()
         self._flash_hint("已置顶" if new else "已取消置顶")
 
     # ---------------- 窗口状态 ----------------
@@ -872,7 +668,7 @@ class HanziPopup:
             )
             self._maximized = True
             self.refresh()
-        self._sync_resize_zones()   # US5：最大化时禁用拖动改大小
+        self.zones.sync()   # US5：最大化时禁用拖动改大小
 
     def quit(self) -> None:
         if self._closing:
@@ -885,6 +681,10 @@ class HanziPopup:
                 except Exception:
                     pass
         self._poll_job = self._hint_job = self._refresh_job = None
+        try:
+            self.bottom.cancel()
+        except Exception:
+            pass
         self._remember_geometry()
         self._stop_background()
         try:
@@ -1226,14 +1026,19 @@ class HanziPopup:
                       self.cfg.get("select_double_modifier"),
                       self.cfg.get("select_double_mode"),
                       self.cfg.get("select_double_key"))
-        old_hand = self.module_enabled("handwriting")
+        old_modules = dict(self.cfg.get("modules") or {})
 
         self.cfg.update(values)
         self.cfg["schemaVersion"] = CONFIG_SCHEMA
         save_config(self.cfg)
 
         self.root.attributes("-topmost", bool(self.cfg.get("always_on_top", True)))
-        self._refresh_pin()
+        self.titlebar.refresh_pin()
+
+        # 模块开关变了：重载功能模块并整体重绘（新模块的面板/入口要出现或消失）
+        if (self.cfg.get("modules") or {}) != old_modules:
+            self.reload_features()
+            return
 
         # US13：主题/背景变了就地重绘（不用重启）
         new_theme = (self.cfg.get("theme"), self.cfg.get("theme_background"))
@@ -1257,8 +1062,8 @@ class HanziPopup:
 
         # US5：热区厚度/开关变了重新铺一遍
         if bool(self.cfg.get("resize_enabled", True)) != old_resize:
-            self._layout_resize_zones()
-            self._sync_resize_zones()
+            self.zones.layout()
+            self.zones.sync()
 
         if self.cfg.get("auto_clipboard"):
             self._start_clipboard_watch()
@@ -1277,12 +1082,9 @@ class HanziPopup:
         if new_select != old_select or self._mouse is None:
             self._start_select_double()
 
-        # US12：手写入口随模块开关出现/消失
-        if self.module_enabled("handwriting") != old_hand:
-            self.rebuild_ui()
-            return
-
-        self.hint.configure(text=self._hint_text())
+        self.bottom.set_default(self._hint_text())
+        # 模块自己的设置项（比如五度图高度）也要立刻生效
+        self.refresh()
         self._flash_hint("设置已保存")
 
     def rebuild_ui(self) -> None:
@@ -1318,18 +1120,14 @@ class HanziPopup:
                 pass
         self._sync_placeholder()
         self.refresh()
-        self._sync_resize_zones()
-        self.hint.configure(text=self._hint_text())
+        self.zones.sync()
+        self.bottom.set_default(self._hint_text())
         self._flash_hint("主题已应用")
 
     def _restyle_widgets(self) -> None:
-        self.title.configure(font=self.font_ui)
-        for w in (self.btn_copy, self.btn_speak):
-            w.configure(font=self.font_ui)
-        for w in (self.btn_close, self.btn_max, self.btn_min):
-            w.configure(font=self.font_ctrl)
+        self.titlebar.restyle()
+        self.bottom.restyle()
         self.entry.configure(font=self.font_entry)
-        self.hint.configure(font=self.font_hint)
         self.multi.configure(font=(self.cn_font, 9))
 
 
@@ -1481,8 +1279,15 @@ def run_selftest() -> int:
     check("US17 配置项存在", DEFAULT_CONFIG["popup_dismiss_on_outside_click"] is True)
     check("US12 手写引擎默认 system", DEFAULT_CONFIG["handwriting_engine"] == "system")
 
-    print("\n配置路径:", config_path())
+    # S4：功能模块自检。这里把所有「已实现」的模块都加载一遍（含没勾上的），
+    # 否则自检会漏掉用户暂时关掉的代码。
     cfg = load_config()
+    feats = load_features(cfg, include_disabled=True)
+    check("S4 已实现模块可加载", len(feats) >= 2, str(sorted(feats)))
+    for name, ok, detail in collect_self_checks(feats):
+        check(name, ok, detail)
+
+    print("\n配置路径:", config_path())
     print("schemaVersion:", cfg.get("schemaVersion"),
           "| trigger:", repr(cfg.get("trigger_key")),
           "| theme:", cfg.get("theme"),

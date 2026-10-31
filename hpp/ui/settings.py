@@ -18,6 +18,7 @@ from ..constants import APP_TITLE, CONFIG_SCHEMA, PROJECT_URL, VERSION
 from ..hotkeys import TriggerKeyListener
 from ..icons import make_caret_image
 from ..modules import MODULES
+from ..features import merge_settings
 from ..settings_spec import SETTING_GROUPS
 from ..speech import list_sapi_voices
 from ..theme import _hex_to_rgb
@@ -41,7 +42,10 @@ class SettingsWindow:
         self.vars = {}
         self.pages = {}
         self.nav_items = {}
-        self.current = SETTING_GROUPS[0]["key"]
+        # S4：功能模块可以往「功能模块」页追加自己的设置项，
+        # 页面的构建、取值、恢复默认都走这份合并后的表
+        self.groups = merge_settings(SETTING_GROUPS, getattr(app, "features", {}))
+        self.current = self.groups[0]["key"]
         self._status_job = None
         self._drag = (0, 0)
 
@@ -108,7 +112,7 @@ class SettingsWindow:
         self.side = tk.Frame(body, bg=c["panel_alt"], width=140)
         self.side.pack(side="left", fill="y")
         self.side.pack_propagate(False)
-        for group in SETTING_GROUPS:
+        for group in self.groups:
             self._nav(group["key"], group["title"])
         self._nav("about", "关于")
 
@@ -139,7 +143,7 @@ class SettingsWindow:
         self.content_canvas.bind("<MouseWheel>", self._on_content_wheel)
         self.content.bind("<MouseWheel>", self._on_content_wheel)
 
-        for group in SETTING_GROUPS:
+        for group in self.groups:
             self.pages[group["key"]] = self._build_group_page(group)
         self.pages["about"] = self._build_about_page()
 
@@ -271,7 +275,7 @@ class SettingsWindow:
         ctrl = holder          # 控件都往这一格塞
 
         key = item["key"]
-        default = DEFAULT_CONFIG.get(key)
+        default = item["default"] if "default" in item else DEFAULT_CONFIG.get(key)
         kind = item["type"]
 
         if kind == "bool":
@@ -463,12 +467,12 @@ class SettingsWindow:
         self._status_job = self.win.after(3000, lambda: self.status.configure(text=""))
 
     def reset_default(self) -> None:
-        for group in SETTING_GROUPS:
+        for group in self.groups:
             for item in group["items"]:
                 key = item["key"]
                 if key not in self.vars:
                     continue
-                default = DEFAULT_CONFIG.get(key)
+                default = item["default"] if "default" in item else DEFAULT_CONFIG.get(key)
                 if item["type"] == "bool":
                     self.vars[key].set(bool(default))
                 elif item["type"] == "int":
@@ -486,7 +490,7 @@ class SettingsWindow:
 
     def _collect(self) -> dict:
         values = {}
-        for group in SETTING_GROUPS:
+        for group in self.groups:
             for item in group["items"]:
                 key = item["key"]
                 var = self.vars.get(key)

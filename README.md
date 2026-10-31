@@ -279,13 +279,13 @@ pyinstaller --noconfirm --windowed --noupx --onefile --name HanziPinyinPopup-por
 - macOS：`~/Library/Application Support/HanziPinyinPopup/config.json`
 - Linux：`~/.config/HanziPinyinPopup/config.json`
 
-写入是原子的（临时文件 + `fsync` + `os.replace`），断电不会写坏。字段含义见 [`config.sample.json`](config.sample.json)，当前 `schemaVersion = 4`。旧配置启动时自动迁移（补默认值、清掉已废弃的 `hotkey`、把 `dark/light` 映射到 `dark_plus/light_plus`）。
+写入是原子的（临时文件 + `fsync` + `os.replace`），断电不会写坏。字段含义见 [`config.sample.json`](config.sample.json)，当前 `schemaVersion = 5`。旧配置启动时自动迁移（补默认值、清掉已废弃的 `hotkey`、把 `dark/light` 映射到 `dark_plus/light_plus`）。
 
 主要字段：
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `schemaVersion` | `4` | 配置版本，升级时用于迁移 |
+| `schemaVersion` | `5` | 配置版本，升级时用于迁移 |
 | `theme` / `theme_background` | `dark_plus` / `null` | 主题与可选背景覆盖 |
 | `always_on_top` | `true` | 置顶状态（图钉联动） |
 | `trigger_key` | `ctrl` | 双击唤起的键，空字符串 = 禁用 |
@@ -298,6 +298,7 @@ pyinstaller --noconfirm --windowed --noupx --onefile --name HanziPinyinPopup-por
 | `select_double_key` | `shift` | 键盘模式的功能键，须 ≠ `trigger_key` |
 | `trigger_prefers_selection` | `false` | 唤起时若有选区，直接弹迷你浮窗 |
 | `filter_non_han` | `true` | 只对中文与标点注音 |
+| `tone_contour_scale` | `54` | 声调五度图高度（px），功能模块自带的设置项 |
 | `popup_dismiss_on_outside_click` | `true` | 点迷你浮窗外自动关闭 |
 | `mini_popup_auto_hide_ms` | `4000` | 淡出延时，0 = 不自动消失 |
 | `mini_popup_pinned` | `false` | 迷你浮窗默认固定 |
@@ -320,7 +321,19 @@ pyinstaller --noconfirm --windowed --noupx --onefile --name HanziPinyinPopup-por
 ## 项目结构
 
 ```
-hanzi_pinyin.py            # 单文件应用（解析 / 界面 / 托盘 / 手写 / 主题）
+hanzi_pinyin.py            # 外壳：主窗口装配、单实例、自检、main
+hpp/                       # 内部包（依赖单向：下层不认识上层）
+├── constants / modules / settings_spec     纯数据
+├── paths / pinyin / icons / theme          无界面小工具
+├── config / speech / selection / clipboard / hotkeys
+├── ui/                                     界面组件
+│   ├── widgets.py                          标题栏 / 底部条 / 八向热区
+│   ├── ruby_view / mini_popup / settings
+│   └── first_run / handwriting
+└── features/                               功能模块（S4 起的插件）
+    ├── base.py                             Feature 契约
+    ├── registry.py                         按开关加载 + 异常隔离
+    └── <key>.py                            一个模块一个文件
 config.sample.json         # 配置示例（唯一的配置文件范例，真实配置不入库）
 requirements.txt
 start.bat / run.sh         # Windows / Unix 启动脚本
@@ -329,6 +342,15 @@ docs/                      # 截图
 开发规范.md                # 常驻开发规范
 开发文档归档文件夹/        # 历次开发文档与阶段总结
 ```
+
+### 加一个功能模块
+
+1. 在 `hpp/features/` 下建 `<模块 key>.py`，写一个 `Feature` 子类并声明 `FEATURE = 你的类`；
+2. 需要界面就实现 `panel(parent)`，需要改渲染就实现 `annotate(items)`，需要设置项就实现 `settings_spec()`；
+3. 需要自检就实现 `self_check()`，`--selftest` 会自动带上。
+
+不用改注册表、不用改主窗口、不用动设置界面——`hpp/features/registry.py` 按 `hpp/modules.py`
+里的顺序找文件，没有文件的模块静默跳过，某个模块抛异常也只会被记一行 warn。
 
 ## 实现要点
 

@@ -14,13 +14,17 @@ from .handwriting import HandwritingPad
 from .mini_popup import MiniPopup
 from .ruby_view import RubyView
 from .settings import SettingsWindow
+from .widgets import BottomBar, ResizeZones, TitleBar
 
 __all__ = [
     "PLACEHOLDER",
     "_release_grab",
+    "BottomBar",
     "FirstRunWindow",
     "HandwritingPad",
     "MiniPopup",
+    "ResizeZones",
     "RubyView",
     "SettingsWindow",
+    "TitleBar",
 ]

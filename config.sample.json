@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "start_hidden": false,
   "always_on_top": true,
   "language": "zh-CN",
@@ -48,6 +48,7 @@
     "handwriting": true
   },
   "first_run": true,
+  "tone_contour_scale": 54,
   "window_width": 420,
   "window_height": 200,
   "position": [

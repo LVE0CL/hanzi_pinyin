@@ -52,6 +52,8 @@ DEFAULT_CONFIG = {
     "handwriting_engine": "system",    # US12：system / offline
     "modules": default_modules(),      # US11：15 个可选模块开关
     "first_run": True,                 # US11：首次启动引导
+    # S4：功能模块自带的设置项（谁的功能谁声明，见 features/*.py 的 settings_spec）
+    "tone_contour_scale": 54,          # 声调五度图高度（px）
     # 运行时状态（不算「设置」，但一起持久化）
     "window_width": 420,
     "window_height": 200,
@@ -115,6 +117,10 @@ def migrate(cfg: dict) -> dict:
         ):
             cfg.setdefault(key, DEFAULT_CONFIG[key])
         version = 4
+    if version < 5:
+        # v4 → v5：功能模块的设置项开始进配置，首个是声调五度图的高度
+        cfg.setdefault("tone_contour_scale", DEFAULT_CONFIG["tone_contour_scale"])
+        version = 5
     # 主题名（dark/light → dark_plus/light_plus）与模块表每轮都对齐一次，幂等
     cfg["theme"] = normalize_theme(cfg.get("theme"))
     modules = default_modules()

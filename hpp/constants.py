@@ -15,7 +15,7 @@ HANZI_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
 APP_NAME = "HanziPinyinPopup"
 APP_TITLE = "汉字拼音浮窗"
 VERSION = "1.2.2"
-CONFIG_SCHEMA = 4
+CONFIG_SCHEMA = 5
 SINGLE_INSTANCE_PORT = 47653
 PROJECT_URL = "https://github.com/LVE0CL/hanzi_pinyin"
 

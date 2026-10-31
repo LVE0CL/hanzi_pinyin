@@ -162,7 +162,8 @@ class FirstRunWindow:
         self.cfg["first_run"] = False
         save_config(self.cfg)
         self.close()
-        self.app.rebuild_ui()
+        # 勾选结果直接决定加载哪些功能模块，所以要连模块一起重载
+        self.app.reload_features()
 
     def close_with_defaults(self) -> None:
         """× 或 Esc：不保存勾选，回到默认配置并关闭引导。"""
@@ -172,7 +173,8 @@ class FirstRunWindow:
         self.cfg["first_run"] = False
         save_config(self.cfg)
         self.close()
-        self.app.rebuild_ui()
+        # 勾选结果直接决定加载哪些功能模块，所以要连模块一起重载
+        self.app.reload_features()
         try:
             self.app.show()
         except Exception:
