@@ -50,6 +50,11 @@ def git(*args, **kw):
     return run(["git"] + list(args), **kw)
 
 
+def unlock() -> None:
+    """交活成功即视为这一轮结束，放掉工作树锁（PM 忘了也会被这里补上）。"""
+    run([PY, os.path.join("tools", "next_task.py"), "--unlock"], timeout=60)
+
+
 def load_task(task_id: str) -> dict:
     with io.open(TASKS_FILE, encoding="utf-8") as f:
         tasks = json.load(f)["tasks"]
@@ -176,10 +181,12 @@ def main(argv=None) -> int:
         code, out = run([PY, os.path.join("tools", "next_task.py"),
                          "--complete", args.task, "--commit", sha], timeout=120)
         print(out.strip())
+        unlock()
         return 0
 
     if args.pm:
         print(f"PM 维护提交 {sha} 完成（不占任务号）。")
+        unlock()
         return 0
 
     code, out = git("tag", "-a", args.release, "-m", f"release {args.release}")
@@ -189,6 +196,7 @@ def main(argv=None) -> int:
     code, out = run([PY, os.path.join("tools", "next_task.py"),
                      "--release-done", "--tag", args.release], timeout=120)
     print(out.strip())
+    unlock()
     print(f"\n发版收尾完成：{args.release}  {datetime.now().isoformat(timespec='seconds')}")
     return 0
 

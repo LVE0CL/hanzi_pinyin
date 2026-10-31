@@ -17,6 +17,7 @@ python tools/next_task.py --status
 | `roles/M0.md` `M1.md` `M2.md` | 人（PM） | 三个岗位的任务书：能改什么、红线、交付标准 |
 | `needs.md` | 执行轮 | 干活时发现「必须改共享文件」就往这里记一条，不许自己动手 |
 | `STOP` | `next_task.py` | 有这个文件，所有轮次立即停手（发版完成会自动写） |
+| `.lock` | `next_task.py` | 工作树锁：上一轮没放锁时下一轮直接 `busy` 退出，避免两个进程改同一份代码 |
 | `store-api.md` | M0（T01） | 本地存储接口说明，M1 的 T05/T08 要读 |
 
 ## 一条指令跑完全程

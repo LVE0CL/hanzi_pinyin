@@ -18,6 +18,7 @@ config.json
 # 无人值守开发的运行期现场：进度要提交（换机器能续跑），临时文件不用
 .team/gate.log
 .team/STOP
+.team/.lock
 .team/*.tmp
 
 # 编辑器

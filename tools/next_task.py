@@ -24,15 +24,18 @@ import io
 import json
 import os
 import sys
+import time
 from datetime import datetime
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TASKS_FILE = os.path.join(ROOT, "backlog", "tasks.json")
 STATE_FILE = os.path.join(ROOT, ".team", "progress.json")
 STOP_FILE = os.path.join(ROOT, ".team", "STOP")
+LOCK_FILE = os.path.join(ROOT, ".team", ".lock")
 
 MAX_ATTEMPTS = 2          # 同一个任务连续失败这么多次就 blocked
 MAX_RELEASE_ATTEMPTS = 3  # 发版失败这么多次就停下等人
+LOCK_TTL_MIN = 90         # 锁超过这么久没人解，视为上一轮已经死了
 
 
 def now() -> str:
@@ -84,6 +87,31 @@ def mark(state: dict, task_id: str, **fields) -> None:
     entry["updated"] = now()
 
 
+def lock_busy() -> float:
+    """上一轮还占着吗？返回已占用分钟数，没占用返回 0。
+
+    定时的自动化可能在上一条还没跑完时就叫下一轮，两个进程同时改同一个工作树
+    是最难收拾的事故，所以用一把过期锁把它们串起来。
+    """
+    if not os.path.exists(LOCK_FILE):
+        return 0.0
+    age = (time.time() - os.path.getmtime(LOCK_FILE)) / 60.0
+    if age >= LOCK_TTL_MIN:
+        return 0.0
+    return age
+
+
+def take_lock() -> None:
+    os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
+    with io.open(LOCK_FILE, "w", encoding="utf-8", newline="\n") as f:
+        f.write(f"{os.getpid()} {now()}\n")
+
+
+def release_lock() -> None:
+    if os.path.exists(LOCK_FILE):
+        os.remove(LOCK_FILE)
+
+
 def eligible(task: dict, state: dict) -> bool:
     for dep in task.get("depends_on") or []:
         if state["tasks"].get(dep, {}).get("status") != "done":
@@ -133,6 +161,11 @@ def decide(tasks: list, state: dict) -> dict:
     if os.path.exists(STOP_FILE):
         return {"action": "stop", "reason": "存在 .team/STOP（发版完成或人工叫停）",
                 "progress": info}
+
+    busy = lock_busy()
+    if busy:
+        return {"action": "busy", "progress": info,
+                "reason": f"上一轮还占着工作树（{busy:.0f} 分钟），本轮什么都不做"}
 
     if not state["release"]["done"]:
         left = info["pending"] + info["doing"]
@@ -209,6 +242,7 @@ def main(argv=None) -> int:
     parser.add_argument("--release-done", action="store_true", help="标记发版完成")
     parser.add_argument("--tag", default=None, help="发版 tag")
     parser.add_argument("--fail-release", action="store_true", help="记一次发版失败")
+    parser.add_argument("--unlock", action="store_true", help="本轮结束，放掉工作树锁")
     args = parser.parse_args(argv)
 
     tasks = load_tasks()
@@ -265,9 +299,16 @@ def main(argv=None) -> int:
         print_status(tasks, state)
         return 0
 
+    if args.unlock:
+        release_lock()
+        print("已放掉工作树锁，下一轮可以开工")
+        return 0
+
     verdict = decide(tasks, state)
     commit_decision(state, verdict)
     save_json(args.state, state)
+    if verdict["action"] in ("work", "release"):
+        take_lock()
     if args.json:
         print(json.dumps(verdict, ensure_ascii=False, indent=2))
     else:

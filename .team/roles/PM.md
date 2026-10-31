@@ -25,7 +25,14 @@
 python tools/next_task.py --json
 ```
 
-返回三种 `action`，按 §2 / §3 / §4 走。**不要自己挑任务**，队列挑的就是对的。
+返回四种 `action`，按 §2 / §3 / §4 / §5 走。**不要自己挑任务**，队列挑的就是对的。
+
+| action | 意思 | 你去哪一节 |
+| --- | --- | --- |
+| `work` | 派了活 | §2 |
+| `release` | 全部做完，该发版了 | §3 |
+| `stop` | 停手（有 STOP / 发版连续失败） | §4 |
+| `busy` | 上一轮还没放开工作树（90 分钟内的锁） | §4.5 |
 
 ---
 
@@ -52,6 +59,10 @@ python tools/next_task.py --json
    它会按顺序做：范围检查 → 门禁 → 提交 → 推送 → 记账。**任何一步失败就停在那里，
    不要绕过去自己 `git commit`。**
 6. 在本文件末尾 `.team/journal.md` 追一行：日期 / 任务 / 提交号 / 一句话。
+
+> `ship.py` 成功会自动放锁。**如果这一轮没走到 ship（放弃了、超时了），
+> 结束前必须 `python tools/next_task.py --unlock`**，否则下一轮会看到 `busy`
+> 白等一个周期。
 
 ### 时间盒
 
@@ -108,6 +119,14 @@ python tools/next_task.py --json
 - 进度（done/total）、blocked 有哪些、release 状态；
 - 若 `STOP` 是因为发版完成，写出 tag 与产物路径（`C:\hppbuild\dist\`）；
 - 若是因为发版连续失败，把 `gate.log` 最后一次 FAIL 抄出来。
+
+---
+
+## 4.5 action = "busy"
+
+上一轮还没有放锁（可能是它挂了）。**这一轮什么都不做，直接结束**，不要抢锁、
+不要"顺手看一下代码"。锁会在 90 分钟后自动过期；确实要立刻接上，先确认没有别的
+进程在跑，再 `python tools/next_task.py --unlock`。
 
 ---
 
