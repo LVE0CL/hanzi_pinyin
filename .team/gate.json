@@ -1,9 +1,9 @@
 {
   "stage": "fast",
   "tag": "",
-  "started": "2026-10-31T15:52:08+08:00",
-  "finished": "2026-10-31T15:52:33+08:00",
-  "seconds": 24.2,
+  "started": "2026-10-31T16:36:29+08:00",
+  "finished": "2026-10-31T16:36:54+08:00",
+  "seconds": 24.7,
   "interpreter": "C:\\Users\\25243\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
   "ok": true,
   "failed": [],
@@ -16,7 +16,7 @@
     {
       "name": "界面验收 _accept.py",
       "ok": true,
-      "seconds": 8.0
+      "seconds": 8.1
     },
     {
       "name": "缺陷回归 _bugfix_test.py",
@@ -31,7 +31,7 @@
     {
       "name": "S3 界面零件检查",
       "ok": true,
-      "seconds": 3.9
+      "seconds": 4.0
     },
     {
       "name": "S4 模块契约检查",
@@ -41,12 +41,12 @@
     {
       "name": "包内模块导入体检",
       "ok": true,
-      "seconds": 0.5
+      "seconds": 0.6
     },
     {
       "name": "功能模块加载与自检",
       "ok": true,
-      "seconds": 0.2
+      "seconds": 0.6
     }
   ]
 }
