@@ -10,6 +10,10 @@
    模块里目前只有几个有实现，勾了没实现的不该报错。
 3. **一个坏模块不能拖垮程序**：import / 实例化 / 各回调全部套 try/except，
    出错只在 stderr 记一行，然后当它不存在。
+
+打包注意：模块是动态 import 的，PyInstaller 静态分析发现不了，打 exe 时必须加
+`--collect-submodules hpp.features`，否则运行时一个模块都加载不到（`--selftest`
+的「S4 已实现模块可加载」会因此失败）。
 """
 from __future__ import annotations
 

@@ -131,13 +131,19 @@ Windows 上也可以直接双击 `start.bat`（会检查依赖并用 `pythonw` �
 pip install pyinstaller
 
 # 绿色版（目录形式，启动快）
-pyinstaller --noconfirm --windowed --noupx --name HanziPinyinPopup hanzi_pinyin.py
+pyinstaller --noconfirm --windowed --noupx --collect-submodules hpp.features \
+    --name HanziPinyinPopup hanzi_pinyin.py
 # 产物：dist/HanziPinyinPopup/HanziPinyinPopup.exe（需与 _internal 同目录）
 
 # 单文件版
-pyinstaller --noconfirm --windowed --noupx --onefile --name HanziPinyinPopup-portable hanzi_pinyin.py
+pyinstaller --noconfirm --windowed --noupx --onefile --collect-submodules hpp.features \
+    --name HanziPinyinPopup-portable hanzi_pinyin.py
 ```
 
+> **`--collect-submodules hpp.features` 不能省**：功能模块是按 `<key>.py` 动态 import 的，
+> PyInstaller 静态分析看不到它们，不打包进去的话运行时只剩开关、面板全空
+> （`--selftest` 会以「S4 已实现模块可加载」失败告警）。
+>
 > 加 `--noupx`：UPX 压缩会让启动变慢，也更容易被杀软误报。
 > **不要把 `--distpath` / `--workpath` 指到中文长路径下**，Windows 上 PyInstaller 拷贝 DLL 时会报 `PermissionError`，换到 `C:\build` 这类短路径即可。
 
