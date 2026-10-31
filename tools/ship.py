@@ -37,10 +37,33 @@ PY = sys.executable
 ALWAYS_OK = (".team/",)
 
 
+def _decode(raw: bytes) -> str:
+    """解子进程输出：先 UTF-8，解不开再 GBK。
+
+    门禁那侧的输出可能是 GBK（中文 Windows 管道默认），也可能是 UTF-8，
+    只用 UTF-8 硬解会造出一串 U+FFFD，print 到 GBK 控制台就是
+    UnicodeEncodeError——交活脚本把自己崩在"打印门禁结果"这一步，很难看。
+    """
+    for encoding in ("utf-8", "gbk"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", "replace")
+
+
+def _harden_console() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
+
+
 def run(cmd, timeout=900, check=False):
     proc = subprocess.run(cmd, cwd=ROOT, timeout=timeout,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    out = (proc.stdout or b"").decode("utf-8", "replace")
+    out = _decode(proc.stdout or b"")
     if check and proc.returncode != 0:
         raise SystemExit(f"命令失败：{' '.join(cmd)}\n{out}")
     return proc.returncode, out
@@ -116,6 +139,7 @@ def main(argv=None) -> int:
     if bool(args.task) == bool(args.release) and not (args.pm and not args.task and not args.release):
         parser.error("--task / --release / --pm 必须且只能给一个")
 
+    _harden_console()
     paths = changed_paths()
     if not paths:
         print("工作区没有改动，没什么可交的。")

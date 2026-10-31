@@ -699,6 +699,17 @@ class HanziPopup:
             self.root.destroy()
         except Exception:
             pass
+        # 退出兜底（真用户也会踩到）：托盘（pystray）与热键监听（pynput）的线程
+        # 在 Windows 上不保证能停干净，主线程会卡在 threading._shutdown() 里等它们，
+        # 结果就是「窗口没了，进程还在」——残留进程还占着单实例端口，下次双击图标
+        # 会被当成"已有实例"，sendall("show") 之后自己退出，用户看到的就是打不开。
+        # 此时配置已由 _remember_geometry() 原子落盘，硬退出没有丢数据的风险。
+        try:
+            guard = threading.Timer(0.8, lambda: os._exit(0))
+            guard.daemon = True
+            guard.start()
+        except Exception:
+            pass
 
     def _stop_background(self) -> None:
         if self._mini is not None:

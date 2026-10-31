@@ -1,9 +1,9 @@
 {
   "stage": "fast",
   "tag": "",
-  "started": "2026-10-31T15:31:26+08:00",
-  "finished": "2026-10-31T15:31:52+08:00",
-  "seconds": 25.6,
+  "started": "2026-10-31T15:52:08+08:00",
+  "finished": "2026-10-31T15:52:33+08:00",
+  "seconds": 24.2,
   "interpreter": "C:\\Users\\25243\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
   "ok": true,
   "failed": [],
@@ -11,27 +11,27 @@
     {
       "name": "启动自检 --selftest",
       "ok": true,
-      "seconds": 0.8
+      "seconds": 0.6
     },
     {
       "name": "界面验收 _accept.py",
       "ok": true,
-      "seconds": 8.4
+      "seconds": 8.0
     },
     {
       "name": "缺陷回归 _bugfix_test.py",
       "ok": true,
-      "seconds": 1.8
+      "seconds": 1.5
     },
     {
       "name": "S2 分层检查",
       "ok": true,
-      "seconds": 5.2
+      "seconds": 5.0
     },
     {
       "name": "S3 界面零件检查",
       "ok": true,
-      "seconds": 4.2
+      "seconds": 3.9
     },
     {
       "name": "S4 模块契约检查",
@@ -41,7 +41,7 @@
     {
       "name": "包内模块导入体检",
       "ok": true,
-      "seconds": 0.7
+      "seconds": 0.5
     },
     {
       "name": "功能模块加载与自检",

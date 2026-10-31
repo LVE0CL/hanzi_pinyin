@@ -8,11 +8,11 @@
   },
   "tasks": {
     "T01": {
-      "status": "pending",
+      "status": "doing",
       "attempts": 0,
       "commit": null,
       "note": "",
-      "updated": "2026-10-31T15:29:42+08:00"
+      "updated": "2026-10-31T15:33:28+08:00"
     },
     "T02": {
       "status": "pending",
@@ -92,5 +92,5 @@
       "updated": null
     }
   },
-  "updated": "2026-10-31T15:29:42+08:00"
+  "updated": "2026-10-31T15:33:28+08:00"
 }

@@ -40,6 +40,30 @@ SIZE_LIMIT_MB = 35.0
 _log_lines: list = []
 
 
+def _decode(raw: bytes) -> str:
+    """解子进程输出：先 UTF-8，解不开再 GBK。
+
+    中文 Windows 的管道默认 GBK，而验收脚本有的已强制 UTF-8、有的一直是 GBK，
+    上下文两种字节混着来。只用 UTF-8 硬解会得到一串 U+FFFD，再 print 到 GBK
+    控制台就是 UnicodeEncodeError——门禁自己被自己搞崩（ship.py 里踩过一次）。
+    """
+    for encoding in ("utf-8", "gbk"):
+        try:
+            return raw.decode(encoding).strip()
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", "replace").strip()
+
+
+def _harden_console() -> None:
+    """控制台编码兜底：遇到 GBK 编不出来的字符就替换，别让打印把进程带走。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
+
+
 def log(msg: str = "") -> None:
     print(msg, flush=True)
     _log_lines.append(msg)
@@ -57,7 +81,7 @@ def _run(cmd, cwd=None, timeout=180):
         return False, time.time() - start, f"超时（>{timeout}s）"
     except FileNotFoundError as exc:
         return False, time.time() - start, f"命令不存在：{exc}"
-    out = (proc.stdout or b"").decode("utf-8", "replace").strip()
+    out = _decode(proc.stdout or b"")
     tail = "\n".join(out.splitlines()[-12:])
     return proc.returncode == 0, time.time() - start, tail
 
@@ -223,6 +247,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     os.makedirs(TEAM, exist_ok=True)
+    _harden_console()
     started = datetime.now().astimezone().isoformat(timespec="seconds")
     py = resolve_python()
     if not args.json:

@@ -30,6 +30,13 @@ Thumbs.db
 # 本地调试脚本（只忽略根目录的 _xxx.py）
 # 注意别写成 `_*.py`：那会连 hpp/__init__.py 一起忽略掉，包初始化文件就进不了仓库
 /_*.py
+# 例外：门禁（tools/gate.py）写死要跑这几套验收，必须进版本库，
+# 否则新克隆出来的仓库没有它们，gate.py 会按「脚本不存在，跳过」直接假绿。
+!/_accept.py
+!/_bugfix_test.py
+!/_s2_check.py
+!/_s3_check.py
+!/_s4_check.py
 
 # PyInstaller 生成的 spec
 *.spec
