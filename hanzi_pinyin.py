@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-汉字拼音浮窗 · Hanzi Pinyin Popup  v1.2.1
+"""汉字拼音浮窗 · Hanzi Pinyin Popup  v1.2.1
 =========================================
 
 一个常驻托盘的小浮窗：在任何地方写/打出汉字，立刻看到拼音（多音字全列）、
@@ -35,33 +34,25 @@ v1.2.1 修复：
     · 双击 exe 后主窗口不出现（start_hidden 残留 + 裸 deiconify 不渲染）
       → 手动启动一律显示主窗口，--hidden 才驻留托盘；启动后 0.9 s 兜底再拉一次
 
+v1.3.0 重构 S1：
+    · 叶子模块搬到 hpp/（constants / modules / config / theme / pinyin /
+      icons / speech / selection / clipboard / hotkeys），本文件暂留 UI 与编排
+
 许可证：MIT
 """
 
 from __future__ import annotations
 
 import argparse
-import base64
-import json
-import math
 import os
 import platform
 import queue
-import re
 import socket
 import subprocess
 import sys
 import threading
 import time
 import webbrowser
-
-# --------------------------------------------------------------------------
-# 依赖检查
-# --------------------------------------------------------------------------
-try:
-    from pypinyin import Style, pinyin as pinyin_of
-except ImportError:  # pragma: no cover
-    sys.exit("缺少依赖 pypinyin，请先执行：pip install -r requirements.txt")
 
 try:
     import tkinter as tk
@@ -74,1168 +65,72 @@ except ImportError:  # pragma: no cover
     )
 
 try:
-    import pyperclip  # 跨平台剪贴板
-except ImportError:  # pragma: no cover
-    pyperclip = None
-
-try:
     from PIL import Image, ImageDraw, ImageFont, ImageTk
 except ImportError:  # pragma: no cover
     sys.exit("缺少依赖 Pillow，请先执行：pip install -r requirements.txt")
 
-HANZI_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
-
-# --------------------------------------------------------------------------
-# 常量
-# --------------------------------------------------------------------------
-APP_NAME = "HanziPinyinPopup"
-APP_TITLE = "汉字拼音浮窗"
-VERSION = "1.2.1"
-CONFIG_SCHEMA = 4
-SINGLE_INSTANCE_PORT = 47653
-PROJECT_URL = "https://github.com/LVE0CL/hanzi_pinyin"
-
-# --------------------------------------------------------------------------
-# 第 2 批可选功能模块（US11）：开关框架本期就位，内部功能后续迭代逐个落地
-# --------------------------------------------------------------------------
-MODULES = [
-    {"key": "stroke_animation", "label": "笔画顺序动画",
-     "hint": "按笔顺逐笔回放单字写法"},
-    {"key": "stroke_practice_sheet", "label": "字帖生成",
-     "hint": "导出米字格字帖 PDF / 图片"},
-    {"key": "srs_review", "label": "生词本 + SRS 复习",
-     "hint": "按间隔重复算法安排复习"},
-    {"key": "spelling_quiz", "label": "拼写自测 / 听写",
-     "hint": "听读音写拼音或写汉字"},
-    {"key": "tone_contour", "label": "声调五度图",
-     "hint": "画出调值曲线，直观看出高低升降"},
-    {"key": "custom_pronunciation", "label": "自定义读音词库",
-     "hint": "给多音字 / 人名地名词条指定读法"},
-    {"key": "translate_on_select", "label": "划词翻译",
-     "hint": "选中文字时附带常见义项"},
-    {"key": "hsk_frequency", "label": "HSK 等级 + 字频",
-     "hint": "标注 HSK 级别与使用频率"},
-    {"key": "ruby_export", "label": "Ruby 注音导出",
-     "hint": "导出带注音的 HTML / Word"},
-    {"key": "pinyin_reverse_lookup", "label": "拼音反向查字",
-     "hint": "输入 han4 反查候选汉字"},
-    {"key": "bopomofo", "label": "注音符号（ㄅㄆㄇ）",
-     "hint": "台湾惯用的注音显示方式"},
-    {"key": "variant_chars", "label": "繁简 / 异体对照",
-     "hint": "同时给出繁体与异体写法"},
-    {"key": "learning_stats", "label": "学习统计面板",
-     "hint": "查询次数、生词增长、复习完成度"},
-    {"key": "cloud_sync", "label": "云同步生词本",
-     "hint": "多设备同步（需自备存储）"},
-    {"key": "handwriting", "label": "手写功能（US12）",
-     "hint": "内置手写板 + 系统手写识别", "default": True},
-]
-
-MODULE_KEYS = [m["key"] for m in MODULES]
-
-
-def default_modules() -> dict:
-    return {m["key"]: bool(m.get("default", False)) for m in MODULES}
-
-# --------------------------------------------------------------------------
-# 配置模型
-# --------------------------------------------------------------------------
-DEFAULT_CONFIG = {
-    "schemaVersion": CONFIG_SCHEMA,
-    # 通用
-    "start_hidden": False,        # 启动时只驻留托盘
-    "always_on_top": True,        # 窗口置顶（US14：可由标题栏图钉切换）
-    "language": "zh-CN",          # 预留：界面语言
-    "resize_enabled": True,       # 允许从边缘拖动改大小
-    "resize_pad": 6,              # 边缘热区厚度(px)
-    "min_width": 320,
-    "min_height": 200,
-    "theme": "dark_plus",         # US13：dark_plus/light_plus/dark_blue/light_blue/monokai
-    "theme_background": None,     # US13：自定义背景色，null = 跟随配色
-    # 快捷键（US15：空字符串 = 禁用）
-    "trigger_key": "ctrl",        # 双击唤起的按键
-    "double_click_ms": 400,       # 双击判定间隔
-    "quit_hotkey": "<ctrl>+<alt>+q",
-    "select_double_popup": True,  # 选中文字后双击弹迷你浮窗
-    "select_double_mode": "mouse",     # mouse / key
-    "select_double_button": "left",    # left / right / middle
-    "select_double_modifier": "none",  # none / ctrl / alt / shift
-    "select_double_key": "shift",      # 键盘模式下双击的按键，须 ≠ trigger_key
-    "trigger_prefers_selection": False,  # 双击触发键时有选区则弹迷你窗而非首页
-    # 功能模块
-    "auto_clipboard": False,      # 剪贴板出现汉字时自动显示
-    "font_size": 32,              # 汉字字号（点）
-    "speech_rate": 0,             # 语速 -10 ~ 10
-    "tts_voice": "auto",          # auto / female / male / 具体 VoiceId
-    "read_char_on_click": True,   # 点单字朗读
-    "preserve_clipboard": True,   # 抓取选区不破坏剪贴板
-    "tone_style": "symbol",       # symbol / num / none
-    "filter_non_han": True,       # FR1：过滤非中文/非标点字符
-    "popup_dismiss_on_outside_click": True,   # US17：点浮窗外自动关闭
-    "mini_popup_auto_hide_ms": 4000,   # 0 = 不自动消失
-    "mini_popup_pinned": False,
-    "handwriting_engine": "system",    # US12：system / offline
-    "modules": default_modules(),      # US11：15 个可选模块开关
-    "first_run": True,                 # US11：首次启动引导
-    # 运行时状态（不算「设置」，但一起持久化）
-    "window_width": 420,
-    "window_height": 200,
-    "position": None,
-}
-
-# 设置界面的声明式定义：加一个设置项 = 这里加一条 + DEFAULT_CONFIG 加默认值
-# type: bool / int / choice
-SETTING_GROUPS = [
-    {
-        "key": "general",
-        "title": "通用",
-        "items": [
-            {
-                "key": "start_hidden",
-                "label": "启动时直接驻留托盘",
-                "type": "bool",
-                "hint": "仅对 --hidden 启动（开机自启）生效；手动双击图标仍会显示主窗口",
-            },
-            {
-                "key": "always_on_top",
-                "label": "窗口置顶",
-                "type": "bool",
-                "hint": "浮窗始终显示在其他窗口之上（也可点标题栏左侧图钉快速切换）",
-            },
-            {
-                "key": "theme",
-                "label": "主题",
-                "type": "choice",
-                "choices": [
-                    ("Dark+", "dark_plus"),
-                    ("Light+", "light_plus"),
-                    ("Dark Blue", "dark_blue"),
-                    ("Light Blue", "light_blue"),
-                    ("Monokai", "monokai"),
-                ],
-                "hint": "VS Code 风配色，保存后立即重绘，不需要重启",
-            },
-            {
-                "key": "theme_background",
-                "label": "背景色",
-                "type": "color",
-                "hint": "可选，留空则跟随主题；只改主背景，其余颜色按明暗自适应",
-            },
-            {
-                "key": "language",
-                "label": "界面语言",
-                "type": "choice",
-                "choices": [("简体中文", "zh-CN")],
-                "readonly": True,
-                "hint": "多语言为后续版本预留",
-            },
-            {
-                "key": "resize_enabled",
-                "label": "拖动改变窗口大小",
-                "type": "bool",
-                "hint": "关闭后只能通过下方的最小尺寸与字号间接控制窗口大小",
-            },
-            {
-                "key": "min_width",
-                "label": "窗口最小宽度",
-                "type": "int",
-                "min": 320,
-                "max": 1200,
-                "step": 20,
-                "suffix": "px",
-                "hint": "拖动缩放时可缩到的最小宽度",
-            },
-            {
-                "key": "min_height",
-                "label": "窗口最小高度",
-                "type": "int",
-                "min": 160,
-                "max": 900,
-                "step": 20,
-                "suffix": "px",
-                "hint": "拖动缩放时可缩到的最小高度",
-            },
-        ],
-    },
-    {
-        "key": "shortcut",
-        "title": "快捷键",
-        "items": [
-            {
-                "key": "trigger_key",
-                "label": "双击唤起的按键",
-                "type": "choice",
-                "choices": [
-                    ("Ctrl", "ctrl"),
-                    ("Alt", "alt"),
-                    ("Shift", "shift"),
-                    ("空格", "space"),
-                    ("Tab", "tab"),
-                    ("F1", "f1"),
-                    ("F2", "f2"),
-                    ("F3", "f3"),
-                    ("不使用（禁用）", ""),
-                ],
-                "hint": "连续按两下该键即可唤起首页；选「不使用」则不注册全局监听",
-            },
-            {
-                "key": "double_click_ms",
-                "label": "双击判定间隔",
-                "type": "int",
-                "min": 150,
-                "max": 1000,
-                "step": 50,
-                "suffix": "ms",
-                "hint": "两次按键间隔小于该值才算双击，400 ms 为跨平台折中值",
-            },
-            {
-                "key": "select_double_popup",
-                "label": "选中双击弹浮窗",
-                "type": "bool",
-                "hint": "选中文字后双击，在光标旁弹出迷你浮窗（需 uiautomation 才能读到选区）",
-            },
-            {
-                "key": "select_double_mode",
-                "label": "选中双击模式",
-                "type": "choice",
-                "choices": [("鼠标", "mouse"), ("键盘", "key")],
-                "hint": "键盘模式适合触控板 / 只想敲键的场景：连续按两下下方功能键",
-            },
-            {
-                "key": "select_double_key",
-                "label": "选中双击的键盘功能键",
-                "type": "choice",
-                "choices": [
-                    ("Shift", "shift"),
-                    ("Ctrl", "ctrl"),
-                    ("Alt", "alt"),
-                    ("空格", "space"),
-                    ("Tab", "tab"),
-                    ("F4", "f4"),
-                    ("F5", "f5"),
-                    ("不使用（禁用）", ""),
-                ],
-                "hint": "必须与「双击唤起键」不同；若相同，保存时会询问是否互换",
-            },
-            {
-                "key": "select_double_button",
-                "label": "选中双击的按钮",
-                "type": "choice",
-                "choices": [("鼠标左键", "left"), ("鼠标右键", "right"), ("鼠标中键", "middle")],
-                "hint": "只在检测到文本选区时触发，空白处双击不受影响",
-            },
-            {
-                "key": "select_double_modifier",
-                "label": "选中双击的修饰键",
-                "type": "choice",
-                "choices": [("不需要", "none"), ("按住 Ctrl", "ctrl"), ("按住 Alt", "alt"), ("按住 Shift", "shift")],
-                "hint": "若与其它软件的双击手势冲突，可加一个修饰键区分",
-            },
-            {
-                "key": "quit_hotkey",
-                "label": "退出热键",
-                "type": "choice",
-                "choices": [
-                    ("Ctrl + Alt + Q", "<ctrl>+<alt>+q"),
-                    ("Ctrl + Shift + Q", "<ctrl>+<shift>+q"),
-                    ("Alt + Shift + Q", "<alt>+<shift>+q"),
-                    ("不使用（禁用）", ""),
-                ],
-                "hint": "任何时候按下都能退出程序；选「不使用」则只能用托盘的退出",
-            },
-            {
-                "key": "trigger_prefers_selection",
-                "label": "优先查询选区",
-                "type": "bool",
-                "hint": "开启后，双击触发键时若当前有选中的文字，直接弹迷你浮窗而不是首页",
-            },
-        ],
-    },
-    {
-        "key": "module",
-        "title": "功能模块",
-        "items": [
-            {
-                "key": "auto_clipboard",
-                "label": "剪贴板自动识别",
-                "type": "bool",
-                "hint": "复制到剪贴板的中文会自动弹出拼音",
-            },
-            {
-                "key": "font_size",
-                "label": "汉字字号",
-                "type": "int",
-                "min": 18,
-                "max": 72,
-                "step": 2,
-                "suffix": "pt",
-                "hint": "调整后窗口会自动适配大小",
-            },
-            {
-                "key": "speech_rate",
-                "label": "朗读语速",
-                "type": "int",
-                "min": -10,
-                "max": 10,
-                "step": 1,
-                "hint": "0 为系统默认语速，负数更慢",
-            },
-            {
-                "key": "tts_voice",
-                "label": "朗读嗓音",
-                "type": "choice",
-                "choices": [("跟随系统", "auto"), ("女声优先", "female"), ("男声优先", "male")],
-                "choices_from": "voices",
-                "hint": "列表来自系统已安装的 SAPI 嗓音；没有男声时可在「设置 → 语音」里添加语音包",
-            },
-            {
-                "key": "read_char_on_click",
-                "label": "点单字朗读",
-                "type": "bool",
-                "hint": "点击拼音行里的某一个字，只朗读这个字（多音字会顺便切到下一个读音）",
-            },
-            {
-                "key": "preserve_clipboard",
-                "label": "抓取选区不破坏剪贴板",
-                "type": "bool",
-                "hint": "抓取前备份剪贴板，读完后还原，你原来复制的内容不会丢",
-            },
-            {
-                "key": "tone_style",
-                "label": "标调方式",
-                "type": "choice",
-                "choices": [("符号调 hàn", "symbol"), ("数字调 han4", "num"), ("无声调 han", "none")],
-                "hint": "切换后立即按新方式重新显示",
-            },
-            {
-                "key": "mini_popup_auto_hide_ms",
-                "label": "浮窗自动淡出",
-                "type": "int",
-                "min": 0,
-                "max": 30000,
-                "step": 500,
-                "suffix": "ms",
-                "hint": "迷你浮窗停留多久后淡出，0 表示一直留着（也可以在浮窗上点「固定」）",
-            },
-            {
-                "key": "mini_popup_pinned",
-                "label": "浮窗默认固定",
-                "type": "bool",
-                "hint": "勾选后迷你浮窗默认固定，不会自动淡出",
-            },
-            {
-                "key": "filter_non_han",
-                "label": "过滤非中文/非标点",
-                "type": "bool",
-                "hint": "只把中文与标点送进注音，英文、数字、符号、emoji 一律过滤（推荐开启）",
-            },
-            {
-                "key": "popup_dismiss_on_outside_click",
-                "label": "点浮窗外自动关闭",
-                "type": "bool",
-                "hint": "在迷你浮窗以外的地方点一下鼠标就收起（已固定的浮窗不受影响）",
-            },
-            {
-                "key": "handwriting_engine",
-                "label": "手写识别引擎",
-                "type": "choice",
-                "choices": [("系统手写（微软同款）", "system"), ("离线模型（ONNX）", "offline")],
-                "hint": "系统引擎调用 Windows 自带手写识别；离线模型需自行放置 models/handwriting.onnx",
-            },
-        ],
-    },
-]
-
-TRIGGER_LABELS = {
-    value: label
-    for group in SETTING_GROUPS
-    for item in group["items"]
-    if item["key"] == "trigger_key"
-    for label, value in item["choices"]
-}
-
-# 标调方式 → pypinyin style。内部一律用 TONE 计算（词典过滤依赖带调字符串），
-# 显示前再转成用户选的方式。
-TONE_STYLES = [
-    ("符号调 hàn", "symbol"),
-    ("数字调 han4", "num"),
-    ("无声调 han", "none"),
-]
-
-
-def convert_reading(reading: str, style: str) -> str:
-    """把带调拼音（hàn）转成数字调（han4）或无声调（han）。"""
-    if not reading or style == "symbol":
-        return reading
-    try:
-        from pypinyin.contrib.tone_convert import to_normal, to_tone3
-    except Exception:
-        return reading
-    try:
-        return to_tone3(reading) if style == "num" else to_normal(reading)
-    except Exception:
-        return reading
-
-# --------------------------------------------------------------------------
-# US13：主题配色表（集中在这一处，切换即重绘，界面里不硬编码颜色）
-# 每套都给齐同样的 key，改配色只改这里。accent_fg = 强调色上的文字色。
-# --------------------------------------------------------------------------
-THEME_COLOR_KEYS = ("panel", "panel_alt", "border", "fg", "fg_dim", "accent",
-                    "accent_fg", "hover", "entry_bg", "danger", "scroll")
-
-THEMES = {
-    "dark_plus": {          # VS Code Dark+
-        "panel": "#1e1e1e", "panel_alt": "#252526", "border": "#3c3c3c",
-        "fg": "#d4d4d4", "fg_dim": "#8f8f8f", "accent": "#4ec9b0",
-        "accent_fg": "#0f1f1b", "hover": "#2a2d2e", "entry_bg": "#181818",
-        "danger": "#f48771", "scroll": "#4a4a4a", "dark": True,
-    },
-    "light_plus": {         # VS Code Light+
-        "panel": "#ffffff", "panel_alt": "#f3f3f3", "border": "#e0e0e0",
-        "fg": "#1f1f1f", "fg_dim": "#6f6f6f", "accent": "#007acc",
-        "accent_fg": "#ffffff", "hover": "#e8e8e8", "entry_bg": "#fbfbfb",
-        "danger": "#cd3131", "scroll": "#c8c8c8", "dark": False,
-    },
-    "dark_blue": {          # Visual Studio Dark Blue
-        "panel": "#12212f", "panel_alt": "#1a2c3d", "border": "#2a4256",
-        "fg": "#dbe7f3", "fg_dim": "#7f97ad", "accent": "#4fa3d1",
-        "accent_fg": "#07131d", "hover": "#1e3548", "entry_bg": "#0d1926",
-        "danger": "#e26d6d", "scroll": "#3a5568", "dark": True,
-    },
-    "light_blue": {         # Visual Studio Light Blue
-        "panel": "#f5f9ff", "panel_alt": "#e8f1fb", "border": "#cfe0f0",
-        "fg": "#1b2b3a", "fg_dim": "#6b8299", "accent": "#1f7ac0",
-        "accent_fg": "#ffffff", "hover": "#dceaf8", "entry_bg": "#ffffff",
-        "danger": "#c0392b", "scroll": "#c3d6e8", "dark": False,
-    },
-    "monokai": {            # Monokai
-        "panel": "#272822", "panel_alt": "#2f3029", "border": "#49483e",
-        "fg": "#f8f8f2", "fg_dim": "#a6a68a", "accent": "#a6e22e",
-        "accent_fg": "#1a1f12", "hover": "#3a3b32", "entry_bg": "#1f201b",
-        "danger": "#f92672", "scroll": "#575744", "dark": True,
-    },
-}
-
-# 老配置里的 dark / light 直接映射到对应的新预设
-THEME_ALIASES = {"dark": "dark_plus", "light": "light_plus"}
-
-
-def _hex_to_rgb(value: str):
-    value = (value or "").strip().lstrip("#")
-    if len(value) == 3:
-        value = "".join(ch * 2 for ch in value)
-    if len(value) != 6:
-        return None
-    try:
-        return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
-    except ValueError:
-        return None
-
-
-def _rgb_to_hex(rgb) -> str:
-    return "#%02x%02x%02x" % tuple(max(0, min(255, int(v))) for v in rgb)
-
-
-def _mix(color_a: str, color_b: str, ratio: float) -> str:
-    """按 ratio 把 a 混向 b（0 = 全 a，1 = 全 b）。"""
-    ra, rb = _hex_to_rgb(color_a), _hex_to_rgb(color_b)
-    if ra is None or rb is None:
-        return color_a
-    ratio = max(0.0, min(1.0, ratio))
-    return _rgb_to_hex(tuple(a + (b - a) * ratio for a, b in zip(ra, rb)))
-
-
-def normalize_theme(name: str) -> str:
-    name = THEME_ALIASES.get(name or "", name or "")
-    return name if name in THEMES else "dark_plus"
-
-
-def theme_colors(name: str, background=None) -> dict:
-    """取一套配色；给了 background 就只覆盖主背景，其余颜色按明暗自适应。"""
-    base = dict(THEMES[normalize_theme(name)])
-    rgb = _hex_to_rgb(background) if isinstance(background, str) else None
-    if rgb is not None:
-        lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255.0
-        dark = lum < 0.5
-        base["panel"] = _rgb_to_hex(rgb)
-        base["panel_alt"] = _mix(base["panel"], "#ffffff" if dark else "#000000",
-                                 0.08 if dark else 0.05)
-        base["hover"] = _mix(base["panel"], "#ffffff" if dark else "#000000",
-                             0.16 if dark else 0.09)
-        base["entry_bg"] = _mix(base["panel"], "#000000" if dark else "#ffffff",
-                                0.22 if dark else 0.45)
-        base["border"] = _mix(base["panel"], "#ffffff" if dark else "#000000",
-                              0.26 if dark else 0.14)
-        base["dark"] = dark
-        if dark:
-            base["fg"] = "#e8e8e8"
-            base["fg_dim"] = "#9a9a9a"
-        else:
-            base["fg"] = "#1f2328"
-            base["fg_dim"] = "#6f6f6f"
-    return base
-
-
-
-# --------------------------------------------------------------------------
-# 配置文件：读取 / 迁移 / 原子写入
-# --------------------------------------------------------------------------
-def config_path() -> str:
-    if platform.system() == "Windows":
-        base = os.environ.get("APPDATA") or os.path.expanduser("~")
-    elif platform.system() == "Darwin":
-        base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
-    else:
-        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
-            os.path.expanduser("~"), ".config"
-        )
-    return os.path.join(base, APP_NAME, "config.json")
-
-
-def migrate(cfg: dict) -> dict:
-    """把旧版本配置升级到当前 schema。新增字段一律走这里补齐。"""
-    version = int(cfg.get("schemaVersion", 1) or 1)
-    # US15：「抓取选中文字」热键已被「选中双击弹浮窗」取代，旧字段一律清掉
-    cfg.pop("hotkey", None)
-    if version < 2:
-        # v1 → v2：新增托盘 / 双击唤起相关字段，旧字段名保持不变
-        cfg.setdefault("start_hidden", DEFAULT_CONFIG["start_hidden"])
-        cfg.setdefault("trigger_key", DEFAULT_CONFIG["trigger_key"])
-        cfg.setdefault("double_click_ms", DEFAULT_CONFIG["double_click_ms"])
-        version = 2
-    if version < 3:
-        # v2 → v3：窗口缩放、选中双击、迷你浮窗、朗读嗓音、标调方式
-        for key in (
-            "resize_enabled", "resize_pad", "min_width", "min_height",
-            "select_double_popup", "select_double_button", "select_double_modifier",
-            "tts_voice", "read_char_on_click", "preserve_clipboard", "tone_style",
-            "mini_popup_auto_hide_ms", "mini_popup_pinned", "window_height",
-        ):
-            cfg.setdefault(key, DEFAULT_CONFIG[key])
-        # 老配置只记了宽度，高度给个和内容相称的初值
-        if not isinstance(cfg.get("window_height"), int):
-            cfg["window_height"] = DEFAULT_CONFIG["window_height"]
-        version = 3
-    if version < 4:
-        # v3 → v4：主题 5 套 + 背景覆盖、快捷键空值/键盘模式、模块开关、首启引导、
-        #           手写引擎、非汉字过滤、点浮窗外关闭
-        for key in (
-            "theme_background", "select_double_mode", "select_double_key",
-            "filter_non_han", "popup_dismiss_on_outside_click",
-            "handwriting_engine", "first_run",
-        ):
-            cfg.setdefault(key, DEFAULT_CONFIG[key])
-        version = 4
-    # 主题名（dark/light → dark_plus/light_plus）与模块表每轮都对齐一次，幂等
-    cfg["theme"] = normalize_theme(cfg.get("theme"))
-    modules = default_modules()
-    stored = cfg.get("modules")
-    if isinstance(stored, dict):
-        for key, value in stored.items():
-            if key in modules:
-                modules[key] = bool(value)
-    cfg["modules"] = modules
-    cfg["schemaVersion"] = version
-    return cfg
-
-
-def load_config() -> dict:
-    cfg = dict(DEFAULT_CONFIG)
-    path = config_path()
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as fp:
-                data = json.load(fp)
-            if isinstance(data, dict):
-                cfg.update(data)
-        except Exception as exc:
-            print(f"[warn] 读取配置失败，使用默认配置：{exc}", file=sys.stderr)
-    cfg = migrate(cfg)
-    for key, value in DEFAULT_CONFIG.items():
-        cfg.setdefault(key, value)
-    return cfg
-
-
-def save_config(cfg: dict) -> None:
-    """原子写入，避免写一半断电导致配置损坏。"""
-    path = config_path()
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fp:
-            json.dump(cfg, fp, ensure_ascii=False, indent=2)
-            fp.flush()
-            os.fsync(fp.fileno())
-        os.replace(tmp, path)
-    except Exception as exc:
-        print(f"[warn] 保存配置失败：{exc}", file=sys.stderr)
-
-
-# --------------------------------------------------------------------------
-# 图标（运行时绘制，不依赖外部资源文件）
-# --------------------------------------------------------------------------
-def _cjk_font(size: int):
-    candidates = [
-        r"C:\Windows\Fonts\msyhbd.ttc",
-        r"C:\Windows\Fonts\msyh.ttc",
-        r"C:\Windows\Fonts\simhei.ttf",
-        "/System/Library/Fonts/PingFang.ttc",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-    ]
-    for path in candidates:
-        try:
-            if os.path.exists(path):
-                return ImageFont.truetype(path, size)
-        except Exception:
-            continue
-    return None
-
-
-def make_app_image(size: int = 64):
-    """应用图标：圆角方块 + 「拼」字。"""
-    scale = 4
-    s = size * scale
-    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle([0, 0, s - 1, s - 1], radius=int(s * 0.24), fill=(42, 122, 90, 255))
-    font = _cjk_font(int(s * 0.62))
-    if font is not None:
-        try:
-            box = d.textbbox((0, 0), "拼", font=font)
-            w, h = box[2] - box[0], box[3] - box[1]
-            d.text(((s - w) / 2 - box[0], (s - h) / 2 - box[1]), "拼",
-                   font=font, fill=(255, 255, 255, 255))
-        except Exception:
-            pass
-    return img.resize((size, size), Image.LANCZOS)
-
-
-def make_gear_image(size: int = 18, color: str = "#8b939e"):
-    """齿轮图标：圆环 + 8 个齿，运行时绘制。"""
-    scale = 4
-    s = size * scale
-    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    cx = cy = s / 2
-    ring_r = s * 0.27
-    inner_r = s * 0.31
-    outer_r = s * 0.45
-    width = max(2, int(s * 0.11))
-    for i in range(8):
-        ang = i * math.pi / 4 + math.pi / 8
-        d.line(
-            [cx + inner_r * math.cos(ang), cy + inner_r * math.sin(ang),
-             cx + outer_r * math.cos(ang), cy + outer_r * math.sin(ang)],
-            fill=color, width=width,
-        )
-    d.ellipse([cx - ring_r, cy - ring_r, cx + ring_r, cy + ring_r],
-              outline=color, width=width)
-    return img.resize((size, size), Image.LANCZOS)
-
-
-def make_pin_image(size: int = 16, color: str = "#8f8f8f", filled: bool = False):
-    """US14：图钉图标。filled=True 表示「已钉住」（实心高亮），否则描边。"""
-    scale = 4
-    s = size * scale
-    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    width = max(2, int(s * 0.10))
-    head = [s * 0.28, s * 0.12, s * 0.72, s * 0.44]        # 钉帽（椭圆）
-    body = [(s * 0.32, s * 0.40), (s * 0.68, s * 0.40), (s * 0.60, s * 0.60),
-            (s * 0.40, s * 0.60)]
-    if filled:
-        d.ellipse(head, fill=color)
-        d.polygon(body, fill=color)
-        d.line([s * 0.5, s * 0.58, s * 0.5, s * 0.90], fill=color, width=width)
-    else:
-        d.ellipse(head, outline=color, width=width)
-        d.line(body + [body[0]], fill=color, width=width, joint="curve")
-        d.line([s * 0.5, s * 0.58, s * 0.5, s * 0.90], fill=color, width=width)
-    return img.resize((size, size), Image.LANCZOS)
-
-
-def make_caret_image(size: int = 9, color: str = "#8b939e"):
-    """下拉箭头：向下的小三角。Tk 自带箭头在深色主题下会变成空白方块，故自绘。"""
-    scale = 4
-    w, h = size * scale, int(size * scale * 0.62)
-    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    d.polygon([(0, 0), (w - 1, 0), (w / 2, h - 1)], fill=color)
-    return img.resize((size, max(4, int(size * 0.62))), Image.LANCZOS)
-
-
-# --------------------------------------------------------------------------
-# 拼音分析
-# --------------------------------------------------------------------------
-_COMMON_PAIRS = None
-
-
-def common_pairs() -> set:
-    """pypinyin 的 heteronym 会列出很多生僻又音（"之" → zhī/zhū/zhì）。
-
-    用它的词组词典反查一遍，只保留现代汉语里真实用到的读音。
-    """
-    global _COMMON_PAIRS
-    if _COMMON_PAIRS is None:
-        pairs = set()
-        try:
-            from pypinyin.phrases_dict import phrases_dict
-
-            for word, readings in phrases_dict.items():
-                if len(word) != len(readings):
-                    continue
-                for ch, rs in zip(word, readings):
-                    for r in rs:
-                        pairs.add((ch, r))
-        except Exception:
-            pass
-        _COMMON_PAIRS = pairs
-    return _COMMON_PAIRS
-
-
-# FR1：只放行「中文 + 标点」，其余字符（英文、数字、符号、emoji、空白）过滤掉
-ALLOWED_PUNCT = set(
-    "，。！？；：、（）《》〈〉「」『』【】〔〕—－…～·"
-    ",.!?;:()[]{}<>'\"-+*/=%&@#|^`$"
+# ---- 以下均为 hpp 包内的模块（S1 已迁出，此处仅做导入）---------------
+from hpp.clipboard import (
+    grab_selection,
+    read_clipboard,
+    set_clip_widget,
+    write_clipboard,
 )
-
-
-def filter_text(text: str, enabled: bool = True) -> str:
-    """FR1 缺陷修复：把非中文/非标点的字符滤掉。
-
-    "Hello 你好 123！" → "你好！"：标点原样保留、不参与注音，英文数字不报错不串行。
-    enabled=False 时原样返回（此时英文数字仍只是展示，不注音）。
-    """
-    if not enabled or not text:
-        return text
-    return "".join(
-        ch for ch in text if HANZI_RE.match(ch) or ch in ALLOWED_PUNCT
-    ).strip()
-
-
-def analyze(text: str, tone_style: str = "symbol", filter_non_han: bool = True) -> list:
-    """把一段文字拆成 [{char, readings}]，非汉字（连续的一段）合并为一项。
-
-    readings[0] 是**结合上下文**得到的主读音（"重庆"的"重"读 chóng），
-    后面跟的是该字的其他常见读音（多音字）。
-    tone_style 只影响输出的写法（hàn / han4 / han），消歧与过滤始终按带调进行。
-    filter_non_han=True 时先做 FR1 过滤，英文/数字/emoji 不参与注音也不显示。
-    """
-    text = filter_text(text, filter_non_han)
-    chars = [ch for ch in text if ch not in "\r\n\t"]
-    if not chars:
-        return []
-
-    # 整句一起送进去，pypinyin 才会用词组词典消歧
-    try:
-        contextual = pinyin_of("".join(chars), style=Style.TONE, heteronym=False)
-    except Exception:
-        contextual = []
-
-    items = []
-    buffer = ""  # 连续的非汉字
-    for idx, ch in enumerate(chars):
-        if not HANZI_RE.match(ch):
-            buffer += ch
-            continue
-        if buffer:
-            items.append({"char": buffer, "readings": []})
-            buffer = ""
-
-        try:
-            readings = pinyin_of(ch, style=Style.TONE, heteronym=True)[0]
-        except Exception:
-            readings = []
-        uniq = []
-        for r in readings:
-            if r and r != ch and r not in uniq:
-                uniq.append(r)
-
-        # 只留下词组词典里出现过的读音，过滤掉生僻又音
-        pairs = common_pairs()
-        if pairs and uniq:
-            kept = [r for r in uniq if (ch, r) in pairs]
-            uniq = kept or uniq[:1]
-
-        primary = ""
-        if idx < len(contextual) and contextual[idx]:
-            cand = contextual[idx][0]
-            if cand and cand != ch:
-                primary = cand
-        if not primary and uniq:
-            primary = uniq[0]
-        if primary:
-            uniq = [primary] + [r for r in uniq if r != primary]
-        if tone_style != "symbol" and uniq:
-            uniq = [convert_reading(r, tone_style) for r in uniq]
-
-        items.append({"char": ch, "readings": uniq[:3]})
-
-    if buffer:
-        items.append({"char": buffer, "readings": []})
-    return items
-
-
-def pinyin_plain(items: list) -> str:
-    out = []
-    for it in items:
-        out.append(it["readings"][0] if it["readings"] else it["char"])
-    return " ".join(x for x in out if x.strip())
-
-
-def pinyin_pairs(items: list) -> str:
-    lines = []
-    for it in items:
-        if it["readings"]:
-            lines.append(f"{it['char']}\t{it['readings'][0]}")
-        elif it["char"].strip():
-            lines.append(it["char"].strip())
-    return "\n".join(lines)
-
-
-# --------------------------------------------------------------------------
-# 朗读
-# --------------------------------------------------------------------------
-_VOICE_CACHE = None
-_VOICE_LOCK = threading.Lock()
-
-
-def list_sapi_voices() -> list:
-    """列出系统已安装的 SAPI 嗓音：[(名称, 性别, 语言)]。
-
-    只在 Windows 有效，首次调用约 0.5~1 s，之后走缓存。失败一律返回空列表。
-    """
-    global _VOICE_CACHE
-    with _VOICE_LOCK:
-        if _VOICE_CACHE is not None:
-            return _VOICE_CACHE
-        voices = []
-        if platform.system() == "Windows":
-            script = (
-                "Add-Type -AssemblyName System.Speech;"
-                "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"
-                "$s.GetInstalledVoices() | ForEach-Object { "
-                "$_.VoiceInfo.Name + '|' + $_.VoiceInfo.Gender + '|' + $_.VoiceInfo.Culture.Name }"
-            )
-            for shell in ("powershell", "pwsh"):
-                try:
-                    out = subprocess.run(
-                        [shell, "-NoProfile", "-NoLogo", "-Command", script],
-                        capture_output=True, text=True, encoding="utf-8",
-                        errors="replace", timeout=30,
-                        creationflags=0x08000000,
-                    )
-                    if out.returncode == 0 and out.stdout.strip():
-                        for line in out.stdout.strip().splitlines():
-                            parts = [p.strip() for p in line.split("|")]
-                            if len(parts) >= 3 and parts[0]:
-                                voices.append((parts[0], parts[1], parts[2]))
-                        break
-                except Exception:
-                    continue
-        _VOICE_CACHE = voices
-        return voices
-
-
-def resolve_voice(pref: str) -> str:
-    """把设置里的嗓音偏好解析成具体 VoiceId；空字符串表示交给系统默认。"""
-    pref = (pref or "auto").strip()
-    if not pref or pref == "auto":
-        return ""
-    voices = list_sapi_voices()
-    if not voices:
-        return ""
-    if pref in ("female", "male"):
-        want = pref
-        cands = [v for v in voices if (v[1] or "").lower() == want]
-        # 中文嗓音优先，否则随便挑一个
-        zh = [v for v in cands if "zh" in (v[2] or "").lower()]
-        pick = zh or cands
-        return pick[0][0] if pick else ""
-    names = [v[0] for v in voices]
-    return pref if pref in names else ""
-
-
-class Speech:
-    """优先用 Windows 自带的 System.Speech（常驻进程，延迟低）；其他平台走系统命令。"""
-
-    def __init__(self, rate: int = 0, voice: str = "auto"):
-        self.rate = max(-10, min(10, int(rate)))
-        self.voice = voice or "auto"
-        self.system = platform.system()
-        self._proc = None
-        self._lock = threading.Lock()
-        self._shell = None
-
-    def set_rate(self, rate: int) -> None:
-        rate = max(-10, min(10, int(rate)))
-        if rate != self.rate:
-            self.rate = rate
-            self.close()  # 下次说话时按新语速重建
-
-    def set_voice(self, voice: str) -> None:
-        voice = voice or "auto"
-        if voice != self.voice:
-            self.voice = voice
-            self.close()  # 下次说话时按新嗓音重建
-
-    def _shell_candidates(self):
-        return [self._shell] if self._shell else ["powershell", "pwsh"]
-
-    def _ensure_windows(self) -> bool:
-        if self._proc is not None and self._proc.poll() is None:
-            return True
-        picked = resolve_voice(self.voice)
-        select = ""
-        if picked:
-            safe = picked.replace("'", "''")
-            select = f"try {{ $s.SelectVoice('{safe}') }} catch {{}};"
-        script = (
-            "Add-Type -AssemblyName System.Speech;"
-            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"
-            f"$s.Rate = {self.rate};"
-            + select +
-            "while ($true) {"
-            "  $l = [Console]::In.ReadLine();"
-            "  if ($null -eq $l) { break }"
-            "  if ($l -eq '##quit##') { break }"
-            "  if ($l.Trim().Length -eq 0) { continue }"
-            "  $t = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($l));"
-            "  if ($t.Trim().Length -gt 0) { $s.Speak($t) }"
-            "}"
-        )
-        flags = 0x08000000 if self.system == "Windows" else 0
-        for shell in self._shell_candidates():
-            try:
-                self._proc = subprocess.Popen(
-                    [shell, "-NoProfile", "-NoLogo", "-Command", script],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    text=True,
-                    encoding="ascii",
-                    errors="ignore",
-                    creationflags=flags,
-                )
-                self._shell = shell
-                return True
-            except Exception:
-                self._proc = None
-        print("[warn] 找不到可用的 PowerShell，朗读不可用", file=sys.stderr)
-        return False
-
-    def speak(self, text: str) -> None:
-        text = text.strip()
-        if not text:
-            return
-        threading.Thread(target=self._speak_worker, args=(text,), daemon=True).start()
-
-    def _speak_worker(self, text: str) -> None:
-        with self._lock:
-            if self.system == "Windows":
-                if self._ensure_windows() and self._proc and self._proc.stdin:
-                    try:
-                        payload = base64.b64encode(text.encode("utf-8")).decode("ascii")
-                        self._proc.stdin.write(payload + "\n")
-                        self._proc.stdin.flush()
-                        return
-                    except Exception:
-                        self._proc = None
-                try:
-                    picked = resolve_voice(self.voice)
-                    select = ""
-                    if picked:
-                        select = f"try {{ $s.SelectVoice('{picked.replace(chr(39), chr(39) * 2)}') }} catch {{}};"
-                    ps = (
-                        "Add-Type -AssemblyName System.Speech;"
-                        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"
-                        f"$s.Rate = {self.rate};"
-                        + select +
-                        "$s.Speak([Text.Encoding]::UTF8.GetString("
-                        f"[Convert]::FromBase64String('{base64.b64encode(text.encode()).decode()}')))"
-                    )
-                    subprocess.run(
-                        [self._shell or "powershell", "-NoProfile", "-Command", ps],
-                        creationflags=0x08000000,
-                        timeout=30,
-                    )
-                    return
-                except Exception:
-                    pass
-            elif self.system == "Darwin":
-                try:
-                    cmd = ["say"]
-                    picked = resolve_voice(self.voice)
-                    if picked:
-                        cmd += ["-v", picked]
-                    subprocess.run(cmd + [text], timeout=30)
-                    return
-                except Exception:
-                    pass
-            else:
-                for cmd in ("spd-say", "espeak-ng", "espeak"):
-                    try:
-                        subprocess.run([cmd, text], timeout=30)
-                        return
-                    except Exception:
-                        continue
-
-    def close(self) -> None:
-        proc = self._proc
-        self._proc = None
-        if proc and proc.poll() is None:
-            try:
-                if proc.stdin:
-                    proc.stdin.write("##quit##\n")
-                    proc.stdin.flush()
-                proc.wait(timeout=2)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-
-
-# --------------------------------------------------------------------------
-# 剪贴板
-# --------------------------------------------------------------------------
-CLIP_WIDGET = None
-
-
-def read_clipboard() -> str:
-    if pyperclip is not None:
-        try:
-            return pyperclip.paste() or ""
-        except Exception:
-            pass
-    if CLIP_WIDGET is not None:
-        try:
-            return CLIP_WIDGET.clipboard_get() or ""
-        except Exception:
-            return ""
-    return ""
-
-
-def write_clipboard(text: str) -> None:
-    if pyperclip is not None:
-        try:
-            pyperclip.copy(text)
-            return
-        except Exception:
-            pass
-    if CLIP_WIDGET is not None:
-        try:
-            CLIP_WIDGET.clipboard_clear()
-            CLIP_WIDGET.clipboard_append(text)
-        except Exception:
-            pass
-
-
-# --------------------------------------------------------------------------
-# 选区读取（US6 / US8）
-# --------------------------------------------------------------------------
-_UIA_THREADS = set()
-
-MODIFIER_KEYS = {"ctrl": 0x11, "alt": 0x12, "shift": 0x10}
-_MODIFIER_STATE = set()   # 非 Windows 平台由键盘监听维护
-_MODIFIER_LOCK = threading.Lock()
-
-
-def _init_uia_in_thread():
-    """uiautomation 要求每个使用它的线程各自初始化 COM，否则会静默失败。"""
-    tid = threading.get_ident()
-    if tid in _UIA_THREADS:
-        return True
-    if platform.system() != "Windows":
-        return False
-    try:
-        import uiautomation as auto
-    except Exception:
-        return False
-    for name in ("InitializeUIAutomationInCurrentThread", "UIAutomationInitializerInThread"):
-        fn = getattr(auto, name, None)
-        if callable(fn):
-            try:
-                fn()
-            except Exception:
-                pass
-            break
-    _UIA_THREADS.add(tid)
-    return True
-
-
-def read_selection_uia() -> str:
-    """用 UI Automation 直接读焦点控件的文本选区——**完全不碰剪贴板**。
-
-    读不到（控件不支持 TextPattern、没焦点、非 Windows）就返回空串，
-    调用方据此判断「没有选区」，从而不去打扰用户。
-    """
-    if not _init_uia_in_thread():
-        return ""
-    try:
-        import uiautomation as auto
-
-        ctrl = auto.GetFocusedControl()
-        if ctrl is None:
-            return ""
-        try:
-            pattern = ctrl.GetTextPattern()
-        except Exception:
-            return ""
-        if pattern is None:
-            return ""
-        try:
-            ranges = pattern.GetSelection()
-        except Exception:
-            return ""
-        parts = []
-        for r in ranges or []:
-            try:
-                txt = r.GetText(-1)
-            except Exception:
-                txt = ""
-            if txt:
-                parts.append(txt)
-        return "\n".join(parts).strip()
-    except Exception:
-        return ""
-
-
-# 只有这些控件里的 Ctrl+C 才是「复制文字」，其它（列表、按钮、桌面）按下去可能是复制文件
-TEXT_CONTROL_TYPES = {"EditControl", "DocumentControl", "TextControl"}
-
-
-def control_type_at(x: int, y: int) -> str:
-    """光标落点处的 UIA 控件类型名，用来判断「这里能不能安全地按 Ctrl+C」。"""
-    if not _init_uia_in_thread():
-        return ""
-    try:
-        import uiautomation as auto
-
-        ctrl = auto.ControlFromPoint(int(x), int(y))
-        return getattr(ctrl, "ControlTypeName", "") or ""
-    except Exception:
-        return ""
-
-
-def pressed_modifiers() -> set:
-    """当前按下的修饰键集合（用于区分双击手势）。"""
-    if platform.system() == "Windows":
-        try:
-            import ctypes
-
-            u = ctypes.windll.user32
-            out = set()
-            for name, vk in MODIFIER_KEYS.items():
-                if u.GetAsyncKeyState(vk) & 0x8000:
-                    out.add(name)
-            return out
-        except Exception:
-            return set()
-    with _MODIFIER_LOCK:
-        return set(_MODIFIER_STATE)
-
+from hpp.config import (
+    DEFAULT_CONFIG,
+    config_path,
+    load_config,
+    migrate,
+    save_config,
+)
+from hpp.constants import (
+    APP_NAME,
+    APP_TITLE,
+    CONFIG_SCHEMA,
+    HANZI_RE,
+    PROJECT_URL,
+    SINGLE_INSTANCE_PORT,
+    VERSION,
+)
+from hpp.hotkeys import MouseDoubleClickListener, TriggerKeyListener
+from hpp.icons import (
+    make_app_image,
+    make_caret_image,
+    make_gear_image,
+    make_pin_image,
+)
+from hpp.modules import MODULE_KEYS, MODULES, default_modules
+from hpp.pinyin import (
+    ALLOWED_PUNCT,
+    analyze,
+    common_pairs,
+    convert_reading,
+    filter_text,
+    pinyin_pairs,
+    pinyin_plain,
+)
+from hpp.selection import (
+    MODIFIER_KEYS,
+    TEXT_CONTROL_TYPES,
+    control_type_at,
+    cursor_position,
+    pressed_modifiers,
+    read_selection_uia,
+)
+from hpp.settings_spec import SETTING_GROUPS
+from hpp.speech import Speech, list_sapi_voices, resolve_voice
+from hpp.theme import (
+    THEME_ALIASES,
+    THEME_COLOR_KEYS,
+    THEMES,
+    TONE_STYLES,
+    TRIGGER_LABELS,
+    _hex_to_rgb,
+    _mix,
+    _rgb_to_hex,
+    normalize_theme,
+    theme_colors,
+)
 
 def _release_grab(widget) -> None:
     """释放 pointer grab。
@@ -1249,230 +144,6 @@ def _release_grab(widget) -> None:
             current.grab_release()
     except Exception:
         pass
-
-
-def cursor_position():
-    """当前鼠标位置（跨平台）；失败给个能看的默认值。"""
-    try:
-        from pynput.mouse import Controller
-
-        x, y = Controller().position
-        return int(x), int(y)
-    except Exception:
-        return 200, 200
-
-
-def grab_selection(preserve: bool = True) -> str:
-    """抓取当前选中的文字。
-
-    先走 UIA（不动剪贴板）；拿不到再退回「备份剪贴板 → 模拟 Ctrl+C → 读 → 还原」。
-    preserve=True 时会把用户原来的剪贴板内容放回去。
-    """
-    text = read_selection_uia()
-    if text:
-        return text
-
-    old = read_clipboard()
-    try:
-        from pynput.keyboard import Controller, Key
-
-        kbd = Controller()
-        with kbd.pressed(Key.ctrl):
-            kbd.press("c")
-            kbd.release("c")
-        time.sleep(0.18)
-    except Exception:
-        pass
-    new = read_clipboard() or old
-    if preserve and new != old:
-        time.sleep(0.03)
-        write_clipboard(old)
-    return new
-
-
-# --------------------------------------------------------------------------
-# 全局键监听：双击触发
-# --------------------------------------------------------------------------
-class TriggerKeyListener:
-    """监听「双击某个键」触发回调。现阶段只支持单键。"""
-
-    SUPPORTED = ["ctrl", "alt", "shift", "space", "tab", "caps_lock"] + [
-        f"f{i}" for i in range(1, 13)
-    ]
-
-    def __init__(self, key: str, interval_ms: int, callback):
-        # US15：空字符串 = 用户主动禁用，不做任何监听
-        self.disabled = not key or key not in self.SUPPORTED
-        self.key = key if key in self.SUPPORTED else ""
-        self.interval = max(0.15, min(1.0, int(interval_ms) / 1000.0))
-        self.callback = callback
-        self._last = 0.0
-        self._pressed = False
-        self._listener = None
-
-    @staticmethod
-    def _normalize(key) -> str:
-        try:
-            from pynput import keyboard
-        except Exception:
-            return ""
-        if isinstance(key, keyboard.Key):
-            name = getattr(key, "name", "") or ""
-            return {
-                "ctrl_l": "ctrl", "ctrl_r": "ctrl",
-                "alt_l": "alt", "alt_r": "alt", "alt_gr": "alt",
-                "shift_l": "shift", "shift_r": "shift",
-            }.get(name, name)
-        try:
-            return (key.char or "").lower()
-        except Exception:
-            return ""
-
-    def start(self) -> bool:
-        if self.disabled:
-            return False
-        try:
-            from pynput import keyboard
-        except Exception:
-            print("[warn] 未安装 pynput，双击唤起不可用", file=sys.stderr)
-            return False
-
-        def on_press(key):
-            name = self._normalize(key)
-            if name != self.key:
-                self._last = 0.0
-                return
-            if self._pressed:  # 过滤系统自动重复
-                return
-            self._pressed = True
-            now = time.monotonic()
-            if self._last and (now - self._last) <= self.interval:
-                self._last = 0.0
-                try:
-                    self.callback()
-                except Exception as exc:
-                    print(f"[warn] 触发回调失败：{exc}", file=sys.stderr)
-            else:
-                self._last = now
-
-        def on_release(key):
-            if self._normalize(key) == self.key:
-                self._pressed = False
-
-        try:
-            self._listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-            self._listener.daemon = True
-            self._listener.start()
-            return True
-        except Exception as exc:
-            print(f"[warn] 监听 {self.key} 失败：{exc}", file=sys.stderr)
-            return False
-
-    def stop(self) -> None:
-        if self._listener is not None:
-            try:
-                self._listener.stop()
-            except Exception:
-                pass
-            self._listener = None
-
-
-class MouseDoubleClickListener:
-    """监听「双击鼠标某个键」，并把点击坐标透传给回调（US6）。
-
-    只在两次点击间隔 <= interval 且修饰键匹配时触发；是否真的有选区由回调判断。
-    """
-
-    def __init__(self, button: str, modifier: str, interval_ms: int, callback):
-        self.button = button if button in ("left", "right", "middle") else "left"
-        self.modifier = modifier if modifier in ("none", "ctrl", "alt", "shift") else "none"
-        self.interval = max(0.15, min(1.0, int(interval_ms) / 1000.0))
-        self.callback = callback
-        self._last = 0.0
-        self._listener = None
-        self._mod_listener = None
-
-    def start(self) -> bool:
-        try:
-            from pynput import mouse
-        except Exception:
-            print("[warn] 未安装 pynput，选中双击不可用", file=sys.stderr)
-            return False
-
-        if platform.system() != "Windows":
-            self._start_modifier_tracker()
-
-        def on_click(x, y, button, pressed):
-            if not pressed:
-                return
-            name = getattr(button, "name", "")
-            if name != self.button:
-                self._last = 0.0
-                return
-            now = time.monotonic()
-            if self._last and (now - self._last) <= self.interval:
-                self._last = 0.0
-                if self.modifier != "none" and self.modifier not in pressed_modifiers():
-                    return
-                try:
-                    self.callback(int(x), int(y))
-                except Exception as exc:
-                    print(f"[warn] 选中双击回调失败：{exc}", file=sys.stderr)
-            else:
-                self._last = now
-
-        try:
-            self._listener = mouse.Listener(on_click=on_click)
-            self._listener.daemon = True
-            self._listener.start()
-            return True
-        except Exception as exc:
-            print(f"[warn] 启动鼠标监听失败：{exc}", file=sys.stderr)
-            self._listener = None
-            return False
-
-    def _start_modifier_tracker(self) -> None:
-        """非 Windows 没有 GetAsyncKeyState，用键盘监听自己维护修饰键状态。"""
-        try:
-            from pynput import keyboard
-        except Exception:
-            return
-
-        mapping = {
-            "ctrl_l": "ctrl", "ctrl_r": "ctrl",
-            "alt_l": "alt", "alt_r": "alt", "alt_gr": "alt",
-            "shift_l": "shift", "shift_r": "shift",
-        }
-
-        def on_press(key):
-            name = mapping.get(getattr(key, "name", ""))
-            if name:
-                with _MODIFIER_LOCK:
-                    _MODIFIER_STATE.add(name)
-
-        def on_release(key):
-            name = mapping.get(getattr(key, "name", ""))
-            if name:
-                with _MODIFIER_LOCK:
-                    _MODIFIER_STATE.discard(name)
-
-        try:
-            self._mod_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-            self._mod_listener.daemon = True
-            self._mod_listener.start()
-        except Exception:
-            self._mod_listener = None
-
-    def stop(self) -> None:
-        for listener in (self._listener, self._mod_listener):
-            if listener is not None:
-                try:
-                    listener.stop()
-                except Exception:
-                    pass
-        self._listener = None
-        self._mod_listener = None
-
 
 # --------------------------------------------------------------------------
 # 主窗口
@@ -1589,7 +260,6 @@ class RubyView:
                         "<Button-1>",
                         lambda _e, i=idx: self.app.on_char_click(self, i),
                     )
-
 
 # --------------------------------------------------------------------------
 # 迷你浮窗（US7）
@@ -1869,7 +539,6 @@ class MiniPopup:
         if getattr(self.app, "_mini", None) is self:
             self.app._mini = None
 
-
 class HanziPopup:
     def __init__(self, cfg: dict):
         self.cfg = cfg
@@ -1904,8 +573,7 @@ class HanziPopup:
         self.root = tk.Tk()
         self.root.withdraw()
 
-        global CLIP_WIDGET
-        CLIP_WIDGET = self.root
+        set_clip_widget(self.root)
 
         self.root.title(APP_TITLE)
         self.root.overrideredirect(True)
@@ -3013,7 +1681,6 @@ class HanziPopup:
         self.hint.configure(font=self.font_hint)
         self.multi.configure(font=(self.cn_font, 9))
 
-
 # --------------------------------------------------------------------------
 # US12：手写（系统引擎优先，ONNX 离线模型备选）
 # --------------------------------------------------------------------------
@@ -3387,7 +2054,6 @@ class FirstRunWindow:
             pass
         if getattr(self.app, "_guide", None) is self:
             self.app._guide = None
-
 
 # --------------------------------------------------------------------------
 # 设置窗口
@@ -3946,7 +2612,6 @@ class SettingsWindow:
         if self.app._settings_win is self:
             self.app._settings_win = None
 
-
 # --------------------------------------------------------------------------
 # 单实例
 # --------------------------------------------------------------------------
@@ -4135,7 +2800,6 @@ def main(argv=None) -> int:
         except Exception:
             pass
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
