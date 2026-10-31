@@ -12,6 +12,9 @@ dist/
 # 运行时生成的配置（每台机器不同，不要提交）
 config.json
 
+# 并行开发时 `--config-dir .dev/A` 用掉的隔离配置目录
+.dev/
+
 # 编辑器
 .vscode/
 .idea/

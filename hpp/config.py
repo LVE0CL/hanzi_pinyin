@@ -65,6 +65,11 @@ DEFAULT_CONFIG = {
 # 配置文件：读取 / 迁移 / 原子写入
 # --------------------------------------------------------------------------
 def config_path() -> str:
+    # 开发期隔离：HPP_CONFIG_DIR 指到一个目录，这个实例就只读写那份配置。
+    # 多人/多实例并行调试时靠它，免得互相把对方的模块开关冲掉。
+    override = os.environ.get("HPP_CONFIG_DIR")
+    if override:
+        return os.path.join(os.path.abspath(override), "config.json")
     if platform.system() == "Windows":
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
     elif platform.system() == "Darwin":

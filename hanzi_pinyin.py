@@ -57,6 +57,7 @@ v1.3.0 重构 S2：
 from __future__ import annotations
 
 import argparse
+import os
 import platform
 import queue
 import socket
@@ -97,8 +98,8 @@ from hpp.constants import (
     APP_TITLE,
     CONFIG_SCHEMA,
     HANZI_RE,
-    SINGLE_INSTANCE_PORT,
     VERSION,
+    single_instance_port,
 )
 from hpp.hotkeys import MouseDoubleClickListener, TriggerKeyListener
 from hpp.icons import make_app_image, make_gear_image, make_pin_image
@@ -1341,14 +1342,15 @@ class HanziPopup:
 # 单实例
 # --------------------------------------------------------------------------
 def acquire_single_instance():
+    port = single_instance_port()
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        sock.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))
+        sock.bind(("127.0.0.1", port))
         sock.listen(1)
         return sock
     except OSError:
         try:
-            with socket.create_connection(("127.0.0.1", SINGLE_INSTANCE_PORT), timeout=1.0) as conn:
+            with socket.create_connection(("127.0.0.1", port), timeout=1.0) as conn:
                 conn.sendall(b"show\n")
         except Exception:
             pass
@@ -1495,7 +1497,15 @@ def main(argv=None) -> int:
     parser.add_argument("--text", default=None, help="启动时预填的文字")
     parser.add_argument("--hidden", action="store_true", help="启动后只驻留托盘")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
+    parser.add_argument(
+        "--config-dir", default=None, metavar="DIR",
+        help="把配置读写放到指定目录（多实例/并行开发调试用）",
+    )
     args = parser.parse_args(argv)
+
+    # 必须在任何 load_config() 之前生效
+    if args.config_dir:
+        os.environ["HPP_CONFIG_DIR"] = os.path.abspath(args.config_dir)
 
     if args.selftest:
         return run_selftest()
