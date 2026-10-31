@@ -14,6 +14,70 @@ except ImportError:  # pragma: no cover
     sys.exit("缺少依赖 pypinyin，请先执行：pip install -r requirements.txt")
 
 
+# --------------------------------------------------------------------------
+# 用户词库接入点（M0 的 custom_pronunciation 用，PM 维护）
+# --------------------------------------------------------------------------
+# pypinyin 消歧时真正看的是 constants.PHRASES_DICT。自定义读音要生效，最稳的
+# 做法就是往这份词典里加词条。但模块不该直接改全局状态后没法收拾，所以这里只
+# 开「注册 / 撤销」两个口子，并记下原值好还原。
+_PHRASES: dict | None = None
+_LEXICON_BACKUP: dict = {}
+
+
+def _phrases_dict() -> dict:
+    global _PHRASES
+    if _PHRASES is None:
+        try:
+            from pypinyin.constants import PHRASES_DICT
+            _PHRASES = PHRASES_DICT if isinstance(PHRASES_DICT, dict) else {}
+        except Exception:
+            _PHRASES = {}
+    return _PHRASES
+
+
+def register_lexicon(entries: dict) -> int:
+    """把 `{词: [带调拼音, ...]}` 合并进词组词典，返回真正生效的条数。
+
+    pypinyin 的词典值是「每个字一个列表」的形式（`[['yín'], ['háng']]`），
+    这里统一包装一遍，调用方只给 `["chóng", "qìng"]` 这种扁平列表即可。
+    """
+    table = _phrases_dict()
+    applied = 0
+    for word, syllables in (entries or {}).items():
+        if not word or not syllables:
+            continue
+        try:
+            if word not in _LEXICON_BACKUP:
+                _LEXICON_BACKUP[word] = table.get(word)
+            table[word] = [[s] for s in syllables]
+            applied += 1
+        except Exception:
+            continue
+    return applied
+
+
+def clear_lexicon() -> int:
+    """撤销 register_lexicon 加过的词条：有原值的还原，没有的删掉。"""
+    table = _phrases_dict()
+    removed = 0
+    for word, old in list(_LEXICON_BACKUP.items()):
+        try:
+            if old is None:
+                table.pop(word, None)
+            else:
+                table[word] = old
+            removed += 1
+        except Exception:
+            continue
+    _LEXICON_BACKUP.clear()
+    return removed
+
+
+def lexicon_size() -> int:
+    """当前被自定义词条覆盖的数量（自检/面板显示用）。"""
+    return len(_LEXICON_BACKUP)
+
+
 def convert_reading(reading: str, style: str) -> str:
     """把带调拼音（hàn）转成数字调（han4）或无声调（han）。"""
     if not reading or style == "symbol":

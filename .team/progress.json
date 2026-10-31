@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "release": {
+    "done": false,
+    "attempts": 0,
+    "tag": null,
+    "reason": ""
+  },
+  "tasks": {
+    "T01": {
+      "status": "doing",
+      "attempts": 0,
+      "commit": null,
+      "note": "",
+      "updated": "2026-10-31T15:22:36+08:00"
+    },
+    "T02": {
+      "status": "pending",
+      "attempts": 0,
+      "commit": null,
+      "note": "",
+      "updated": null
+    },
+    "T03": {
+      "status": "pending",
+      "attempts": 0,
+      "commit": null,
+      "note": "",
+      "updated": null
+    },
+    "T04": {
+      "status": "pending",
+      "attempts": 0,
+      "commit": null,
+      "note": "",
+      "updated": null
+    },
+    "T05": {
+      "status": "pending",
+      "attempts": 0,
+      "commit": null,
+      "note": "",
+      "updated": null
+    },
+    "T06": {
+      "status": "pending",
+      "attempts": 0,
+      "commit": null,
+      "note": "",
+      "updated": null
+    },
+    "T07": {
+      "status": "pending",
+      "attempts": 0,
+      "commit": null,
+      "note": "",
+      "updated": null
+    },
+    "T08": {
+      "status": "pending",
+      "attempts": 0,
+      "commit": null,
+      "note": "",
+      "updated": null
+    },
+    "T09": {
+      "status": "pending",
+      "attempts": 0,
+      "commit": null,
+      "note": "",
+      "updated": null
+    },
+    "T10": {
+      "status": "pending",
+      "attempts": 0,
+      "commit": null,
+      "note": "",
+      "updated": null
+    },
+    "T11": {
+      "status": "pending",
+      "attempts": 0,
+      "commit": null,
+      "note": "",
+      "updated": null
+    },
+    "T12": {
+      "status": "pending",
+      "attempts": 0,
+      "commit": null,
+      "note": "",
+      "updated": null
+    }
+  },
+  "updated": "2026-10-31T15:22:36+08:00"
+}

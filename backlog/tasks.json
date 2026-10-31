@@ -1,0 +1,299 @@
+{
+  "version": 1,
+  "note": "自动开发队列。order 是执行顺序，depends_on 里的任务必须 done 才会被派出去。files 之外的文件一律不许改。",
+  "tasks": [
+    {
+      "id": "T01",
+      "key": "custom_pronunciation",
+      "title": "自定义读音词库（含 store 地基）",
+      "owner": "M0",
+      "wave": 1,
+      "order": 1,
+      "difficulty": "中",
+      "depends_on": [],
+      "goal": "让用户给某个词指定读音，优先级高于 pypinyin 的自动消歧；同时把后续所有模块要用的本地存储 hpp/store.py 立起来。",
+      "deliverables": [
+        "hpp/features/custom_pronunciation/ 包（__init__.py + 面板）",
+        "hpp/store.py 最小骨架（原子写 JSON）",
+        "一页接口说明 .team/store-api.md"
+      ],
+      "acceptance": [
+        "FEATURE 存在且 key == custom_pronunciation",
+        "存两条词条后 analyze() 的读音按词条走（例：银行 -> yín xíng）",
+        "删掉词条后读音恢复默认",
+        "store 写入是原子的（tmp + os.replace），坏文件不崩",
+        "面板能列出已录入词条并能删除",
+        "self_check >= 3 项，--selftest 全绿"
+      ],
+      "files": ["hpp/features/custom_pronunciation/**", "hpp/store.py", ".team/store-api.md"],
+      "notes": [
+        "读音覆盖只能走 hpp/pinyin.py 里 PM 开好的 register_lexicon() / clear_lexicon()，不许改 pinyin.py",
+        "store 路径放在 config_path() 同级目录（store.json），跟随 HPP_CONFIG_DIR",
+        "store 只会被 M0 改，M1/M2 只读接口；本任务先把 path/load/save/get_lexicon/set_lexicon 做出来"
+      ],
+      "data_budget_kb": 0
+    },
+    {
+      "id": "T02",
+      "key": "variant_chars",
+      "title": "繁简 / 异体对照",
+      "owner": "M1",
+      "wave": 1,
+      "order": 2,
+      "difficulty": "中",
+      "depends_on": [],
+      "goal": "选中文字时同时给出繁体与异体写法，一简对多繁要按词选（发 -> 髮 / 發）。",
+      "deliverables": ["hpp/features/variant_chars/ 包", "内置繁简表（含多对一例外词表）"],
+      "acceptance": [
+        "FEATURE 存在且 key == variant_chars",
+        "常用 3000 字的单字繁简映射可查",
+        "至少 20 个一简对多繁的例外按词处理（头发->頭發、出发->出發 之类）",
+        "面板显示当前文本的繁体/异体结果，不改原 readings",
+        "找不到映射时优雅留空而不是报错",
+        "self_check >= 3 项，--selftest 全绿"
+      ],
+      "files": ["hpp/features/variant_chars/**"],
+      "notes": [
+        "数据随包，体积 <= 300KB；表要写来源注释",
+        "不要联网、不要引 OpenCC 依赖",
+        "只读 analyze() 的结果，不改 hpp/pinyin.py"
+      ],
+      "data_budget_kb": 300
+    },
+    {
+      "id": "T03",
+      "key": "bopomofo",
+      "title": "注音符号 ㄅㄆㄇ",
+      "owner": "M2",
+      "wave": 1,
+      "order": 3,
+      "difficulty": "小",
+      "depends_on": [],
+      "goal": "把拼音转成注音符号显示，覆盖声母、韵母、整体认读与常见边界。",
+      "deliverables": ["hpp/features/bopomofo/ 包", "拼音->注音映射表"],
+      "acceptance": [
+        "FEATURE 存在且 key == bopomofo",
+        "zhong1 -> ㄓㄨㄥ，guo2 -> ㄍㄨㄛˊ，nv3 -> ㄋㄩˇ 等 10 个样例正确",
+        "ü / yu / yue / yuan 这类边界有处理",
+        "面板或 annotate 展示注音，可与拼音切换",
+        "self_check >= 3 项，--selftest 全绿"
+      ],
+      "files": ["hpp/features/bopomofo/**"],
+      "notes": ["映射表纯静态，不引第三方库", "声调符号用 ˊˇˋ˙ 标在韵母右上"]
+    },
+    {
+      "id": "T04",
+      "key": "srs_review",
+      "title": "生词本 + SRS 复习",
+      "owner": "M0",
+      "wave": 2,
+      "order": 4,
+      "difficulty": "大",
+      "depends_on": ["T01"],
+      "goal": "把查过的字收进生词本，按间隔重复（SM-2 简化）安排复习。",
+      "deliverables": ["hpp/features/srs_review/ 包", "hpp/store.py 补齐复习相关接口"],
+      "acceptance": [
+        "FEATURE 存在且 key == srs_review",
+        "add_word / remove_word / list_words 可用并持久化",
+        "record_review 按 SM-2 简化推进间隔（1/3/7/15/30 天），答错重置",
+        "due_words 只返回到期的词，按到期时间排序",
+        "面板显示今日待复习数量并支持一键加入当前字",
+        "self_check >= 3 项，--selftest 全绿"
+      ],
+      "files": ["hpp/features/srs_review/**", "hpp/store.py"],
+      "notes": [
+        "T01 已经把 store 骨架和接口说明交出来了，按 .team/store-api.md 扩展",
+        "时间统一用 UTC 时间戳存，显示时再转本地时区",
+        "写完更新 .team/store-api.md，M1 的 T05/T08 要读"
+      ]
+    },
+    {
+      "id": "T05",
+      "key": "spelling_quiz",
+      "title": "拼写自测 / 听写",
+      "owner": "M1",
+      "wave": 2,
+      "order": 5,
+      "difficulty": "中",
+      "depends_on": ["T04"],
+      "goal": "从生词本出题：听读音写拼音或写汉字，判分并回写复习记录。",
+      "deliverables": ["hpp/features/spelling_quiz/ 包"],
+      "acceptance": [
+        "FEATURE 存在且 key == spelling_quiz",
+        "能出 10 题一轮，题目不重复",
+        "判分容错：带调 / 不带调 / 数字调号都算对（可配置）",
+        "答错的词回写 store（record_review quality=1）",
+        "一轮结束给出得分与错题列表",
+        "self_check >= 3 项，--selftest 全绿"
+      ],
+      "files": ["hpp/features/spelling_quiz/**"],
+      "notes": [
+        "只读 store 接口，不改 hpp/store.py",
+        "没有生词时给友好占位，不要报错",
+        "朗读用 app.speech（已有），别自己起线程"
+      ]
+    },
+    {
+      "id": "T06",
+      "key": "ruby_export",
+      "title": "Ruby 注音导出",
+      "owner": "M2",
+      "wave": 2,
+      "order": 6,
+      "difficulty": "小",
+      "depends_on": [],
+      "goal": "把当前文字连同注音导出成独立的 HTML（可选 PNG），方便打印或粘到别处。",
+      "deliverables": ["hpp/features/ruby_export/ 包"],
+      "acceptance": [
+        "FEATURE 存在且 key == ruby_export",
+        "导出的 HTML 是单文件（内联 CSS），用 <ruby> 标签，浏览器直接能看",
+        "文件名带时间戳，写到用户选的目录（filedialog）",
+        "空文本时提示而不是导出空文件",
+        "不引 python-docx / reportlab 等第三方库",
+        "self_check >= 3 项，--selftest 全绿"
+      ],
+      "files": ["hpp/features/ruby_export/**"],
+      "notes": ["PNG 导出用已有 Pillow 即可，可选", "HTML 要转义特殊字符"]
+    },
+    {
+      "id": "T07",
+      "key": "pinyin_reverse_lookup",
+      "title": "拼音反向查字",
+      "owner": "M0",
+      "wave": 2,
+      "order": 7,
+      "difficulty": "中",
+      "depends_on": ["T01"],
+      "goal": "输入 han4 / hàn / han 反查候选汉字，按常用度排序。",
+      "deliverables": ["hpp/features/pinyin_reverse_lookup/ 包", "可选的内置索引"],
+      "acceptance": [
+        "FEATURE 存在且 key == pinyin_reverse_lookup",
+        "三种输入写法都能查（数字调号 / 带调符号 / 不带调）",
+        "结果按常用度排序，最多 60 个",
+        "单次查询 < 100ms（索引只建一次）",
+        "面板有输入框和结果网格，点结果写回输入框",
+        "self_check >= 3 项，--selftest 全绿"
+      ],
+      "files": ["hpp/features/pinyin_reverse_lookup/**"],
+      "notes": [
+        "索引可由 pypinyin 的常用字表自建，不要下载数据",
+        "索引建一次缓存在模块内，别每次查询都重建"
+      ]
+    },
+    {
+      "id": "T08",
+      "key": "learning_stats",
+      "title": "学习统计面板",
+      "owner": "M1",
+      "wave": 2,
+      "order": 8,
+      "difficulty": "中",
+      "depends_on": ["T04"],
+      "goal": "展示查询次数、生词增长、复习完成度，让用户看到自己的进展。",
+      "deliverables": ["hpp/features/learning_stats/ 包"],
+      "acceptance": [
+        "FEATURE 存在且 key == learning_stats",
+        "统计口径：查询次数 / 生词数 / 7 日复习完成率",
+        "用 Canvas 自绘柱状或折线图，不引图表库",
+        "无数据时有占位文案，不出现除零错误",
+        "数据全部来自 store 的只读接口",
+        "self_check >= 3 项，--selftest 全绿"
+      ],
+      "files": ["hpp/features/learning_stats/**"],
+      "notes": ["图表颜色从 app.colors 取，不硬编码", "窗口变窄时布局不能崩"]
+    },
+    {
+      "id": "T09",
+      "key": "stroke_animation",
+      "title": "笔画顺序动画",
+      "owner": "M2",
+      "wave": 2,
+      "order": 9,
+      "difficulty": "大",
+      "depends_on": [],
+      "goal": "按笔顺逐笔回放单字写法，支持播放/暂停/重播/调速。",
+      "deliverables": ["hpp/features/stroke_animation/ 包"],
+      "acceptance": [
+        "FEATURE 存在且 key == stroke_animation",
+        "至少 50 个常用字的笔顺数据可用（先内置，体积 <= 500KB）",
+        "Canvas 逐笔动画，能暂停/继续/重播",
+        "调速 0.5x / 1x / 2x",
+        "没有数据的字给出提示而不是空白",
+        "self_check >= 3 项，--selftest 全绿"
+      ],
+      "files": ["hpp/features/stroke_animation/**"],
+      "notes": [
+        "笔顺数据授权待确认：先用自绘的简化笔画（每笔一条折线）把动画跑通，数据结构留好扩展位",
+        "动画用 after() 驱动，不要开线程碰 Tk 控件",
+        "退出时要 after_cancel，否则控制台会刷 invalid command name"
+      ],
+      "data_budget_kb": 500
+    },
+    {
+      "id": "T10",
+      "key": "hsk_frequency",
+      "title": "HSK 等级 + 字频",
+      "owner": "M0",
+      "wave": 3,
+      "order": 10,
+      "difficulty": "中",
+      "depends_on": [],
+      "goal": "给每个字标注 HSK 级别与使用频率，帮用户判断先学哪个。",
+      "deliverables": ["hpp/features/hsk_frequency/ 包", "HSK 分级 + 字频数据表"],
+      "acceptance": [
+        "FEATURE 存在且 key == hsk_frequency",
+        "覆盖 HSK 1-6 级常用字，字频前 3000",
+        "annotate 给每个字补 hsk / freq 字段",
+        "面板显示当前文本的字均等级与最难的三个字",
+        "数据体积 <= 300KB，来源写在文件头注释",
+        "self_check >= 3 项，--selftest 全绿"
+      ],
+      "files": ["hpp/features/hsk_frequency/**"],
+      "notes": ["数据必须随包内置（不联网）", "缺数据的字不要影响其他字"]
+    },
+    {
+      "id": "T11",
+      "key": "translate_on_select",
+      "title": "划词翻译（本地词典）",
+      "owner": "M1",
+      "wave": 3,
+      "order": 11,
+      "difficulty": "中",
+      "depends_on": [],
+      "goal": "选中文字时附带常见义项，纯本地词表，不联网。",
+      "deliverables": ["hpp/features/translate_on_select/ 包", "本地词表"],
+      "acceptance": [
+        "FEATURE 存在且 key == translate_on_select",
+        "词表 >= 5000 条，体积 <= 1MB，来源写在文件头",
+        "能对当前文本逐词给出义项（最长匹配优先）",
+        "查不到时显示「本地词表暂无」，不报错",
+        "面板可折叠，不挤压注音区",
+        "self_check >= 3 项，--selftest 全绿"
+      ],
+      "files": ["hpp/features/translate_on_select/**"],
+      "notes": ["绝对不联网，不引在线 API", "词表要能后续替换（独立 json 文件）"]
+    },
+    {
+      "id": "T12",
+      "key": "stroke_practice_sheet",
+      "title": "字帖生成",
+      "owner": "M2",
+      "wave": 3,
+      "order": 12,
+      "difficulty": "中",
+      "depends_on": [],
+      "goal": "把当前文字排成米字格字帖，导出 PNG 长图。",
+      "deliverables": ["hpp/features/stroke_practice_sheet/ 包"],
+      "acceptance": [
+        "FEATURE 存在且 key == stroke_practice_sheet",
+        "米字格（田字格 + 对角线）绘制正确，格子数与字号可调",
+        "导出 PNG 长图，写到用户选的位置",
+        "每字一行若干格（前几格描红/浅色，后面空白）",
+        "不引 PDF 库；Pillow 画字要处理字体缺失",
+        "self_check >= 3 项，--selftest 全绿"
+      ],
+      "files": ["hpp/features/stroke_practice_sheet/**"],
+      "notes": ["字号与格子数进 settings_spec，带 default", "导出失败要提示路径不可写"]
+    }
+  ]
+}

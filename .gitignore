@@ -15,6 +15,11 @@ config.json
 # 并行开发时 `--config-dir .dev/A` 用掉的隔离配置目录
 .dev/
 
+# 无人值守开发的运行期现场：进度要提交（换机器能续跑），临时文件不用
+.team/gate.log
+.team/STOP
+.team/*.tmp
+
 # 编辑器
 .vscode/
 .idea/
