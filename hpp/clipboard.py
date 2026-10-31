@@ -76,8 +76,12 @@ def grab_selection(preserve: bool = True) -> str:
         time.sleep(0.18)
     except Exception:
         pass
-    new = read_clipboard() or old
-    if preserve and new != old:
+    new = read_clipboard()
+    if not new or new == old:
+        # 剪贴板没变化 = Ctrl+C 根本没复制成功（焦点不在文本上、组合键被打断…）。
+        # 这里绝不能退回旧值，否则会把剪贴板里的陈年内容当成"选区"弹出来。
+        return ""
+    if preserve:
         time.sleep(0.03)
         write_clipboard(old)
     return new

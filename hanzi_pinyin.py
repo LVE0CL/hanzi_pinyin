@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""汉字拼音浮窗 · Hanzi Pinyin Popup  v1.2.1
+"""汉字拼音浮窗 · Hanzi Pinyin Popup  v1.2.2
 =========================================
 
 一个常驻托盘的小浮窗：在任何地方写/打出汉字，立刻看到拼音（多音字全列）、
@@ -33,6 +33,15 @@ v1.2.0 迭代：
 v1.2.1 修复：
     · 双击 exe 后主窗口不出现（start_hidden 残留 + 裸 deiconify 不渲染）
       → 手动启动一律显示主窗口，--hidden 才驻留托盘；启动后 0.9 s 兜底再拉一次
+
+v1.2.2 修复：
+    · 首启引导页 15 项一次铺开，「开始使用」被挤出窗口点不到
+      → 改成 7 项一页、左右翻页；新增 × / Esc 关闭，退出即用默认配置
+    · 输入框左侧被占位提示遮挡，点不进去、选不中、打不了字
+      → 占位提示点击即把焦点交给输入框
+    · 选中双击 Shift 弹的是固定内容而非选中文字
+      → Shift 未松开时发出的其实是 Ctrl+Shift+C（复制失败后读到旧剪贴板）；
+        改为先等修饰键松开、剪贴板无变化不再冒充选区、焦点在自己身上直接跳过
 
 v1.3.0 重构 S1：
     · 叶子模块搬到 hpp/（constants / modules / config / theme / pinyin /
@@ -574,6 +583,11 @@ class HanziPopup:
         self.root.withdraw()
 
         set_clip_widget(self.root)
+        # 记下自己的顶层窗口句柄：读选区时要判断前台是不是自己
+        try:
+            self._hwnd = int(self.root.winfo_id())
+        except Exception:
+            self._hwnd = 0
 
         self.root.title(APP_TITLE)
         self.root.overrideredirect(True)
@@ -707,9 +721,13 @@ class HanziPopup:
         # 占位提示用独立 Label 叠在输入框上，避免被输入/焦点清掉
         self.placeholder = tk.Label(
             self.entry_wrap, text=PLACEHOLDER, bg=c["entry_bg"], fg=c["fg_dim"],
-            font=self.font_entry, anchor="w",
+            font=self.font_entry, anchor="w", cursor="xterm",
         )
         self.placeholder.place(x=10, rely=0.5, anchor="w")
+        # 叠在上面的 Label 会吞掉点击：不把焦点交回去，用户点左侧大半区域
+        # 既选不中文字也打不了字。
+        self.placeholder.bind("<Button-1>", self._placeholder_click)
+        self.placeholder.bind("<B1-Motion>", self._placeholder_click)
 
         # ---- 正文（可滚动）----
         self.body = tk.Frame(self.outer, bg=c["panel"])
@@ -990,6 +1008,12 @@ class HanziPopup:
             self.entry.icursor("end")
         except Exception:
             pass
+
+    def _placeholder_click(self, _event=None) -> str:
+        """点占位提示＝点输入框：交出焦点并让提示消失。"""
+        self._focus_entry()
+        self._sync_placeholder()
+        return "break"
 
     def _start_drag(self, event) -> None:
         if self._maximized:
@@ -1465,10 +1489,43 @@ class HanziPopup:
         """键盘功能键双击回调：光标位置即选区位置。"""
         if self._closing or not self.cfg.get("select_double_popup", True):
             return
-        x, y = cursor_position()
-        threading.Thread(target=self._read_selection_and_pop, args=(x, y), daemon=True).start()
+
+        def worker():
+            # 第二下功能键按下时手还没松：此刻若立刻发 Ctrl+C，
+            # 系统收到的是 Ctrl+Shift+C（多数程序里不是复制），
+            # 复制没成功就会把剪贴板里的旧内容当选区——表现为
+            # 「每次都弹同一段固定文字」。所以先等修饰键松开。
+            deadline = time.monotonic() + 0.4
+            while time.monotonic() < deadline and pressed_modifiers():
+                time.sleep(0.02)
+            time.sleep(0.08)
+            x, y = cursor_position()
+            self._read_selection_and_pop(x, y)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _foreground_is_mine(self) -> bool:
+        """前台窗口是不是自己——自己身上只可能读到自己输入框里的字。"""
+        if platform.system() != "Windows" or not self._hwnd:
+            return False
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            # winfo_id() 给的是子窗口句柄，要取根祖先才能和 GetForegroundWindow 比
+            mine = int(user32.GetAncestor(ctypes.c_void_p(self._hwnd), 2) or 0)  # GA_ROOT
+            fg = int(user32.GetForegroundWindow() or 0)
+            # 任一为 0（获取失败）都必须判 False：0 == 0 会误判成"是我"，
+            # 那样会把所有外部选区都挡掉。
+            if not mine or not fg:
+                return False
+            return mine == fg
+        except Exception:
+            return False
 
     def _read_selection_and_pop(self, x: int, y: int) -> None:
+        if self._foreground_is_mine():
+            return
         text = read_selection_uia()
         if not text and control_type_at(x, y) in TEXT_CONTROL_TYPES:
             # 安全兜底：确认光标下面是文本控件，才允许「备份 → Ctrl+C → 还原」。
@@ -1940,7 +1997,15 @@ class HandwritingPad:
 
 
 class FirstRunWindow:
-    """US11：首次启动的一次性引导页，列出第 2 批可选功能供勾选。"""
+    """US11：首次启动的一次性引导页。
+
+    15 项按 7 项一页分页——一次性全铺出来会把底部按钮挤出窗口（Tk 不裁剪
+    子控件），用户看不到「开始使用」就卡在引导页里出不去了。
+    """
+
+    PAGE_SIZE = 7
+    WIDTH = 520
+    HEIGHT = 470
 
     def __init__(self, app: HanziPopup):
         self.app = app
@@ -1948,6 +2013,7 @@ class FirstRunWindow:
         self.colors = app.colors
         self.alive = True
         self.vars = {}
+        self.page = 0
         self._drag = (0, 0)
         c = self.colors
 
@@ -1957,11 +2023,20 @@ class FirstRunWindow:
         self.win.configure(bg=c["panel"])
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
+
+        mods = self.cfg.get("modules") or {}
+        for mod in MODULES:
+            self.vars[mod["key"]] = tk.BooleanVar(
+                value=bool(mods.get(mod["key"], mod.get("default", False))))
+        self.pages = [MODULES[i:i + self.PAGE_SIZE]
+                      for i in range(0, len(MODULES), self.PAGE_SIZE)]
+
         self._build()
         self._center()
         self.win.deiconify()
-        self.win.bind("<Escape>", lambda _e: self.confirm())
+        self.win.bind("<Escape>", lambda _e: self.close_with_defaults())
 
+    # ---------------- 界面 ----------------
     def _build(self) -> None:
         c = self.colors
         outer = tk.Frame(self.win, bg=c["panel"], highlightthickness=1,
@@ -1969,43 +2044,37 @@ class FirstRunWindow:
         outer.pack(fill="both", expand=True)
 
         header = tk.Frame(outer, bg=c["panel"])
-        header.pack(fill="x", padx=18, pady=(16, 6))
-        tk.Label(header, text="欢迎使用 汉字拼音浮窗", bg=c["panel"], fg=c["fg"],
-                 font=(self.app.cn_font, 13, "bold"), anchor="w").pack(fill="x")
-        tk.Label(header,
-                 text="先挑几个想用的功能吧：下面都是可选项，之后在「设置 → 功能模块」里随时能改。",
+        header.pack(side="top", fill="x", padx=18, pady=(14, 4))
+        title = tk.Label(header, text="欢迎使用 汉字拼音浮窗", bg=c["panel"], fg=c["fg"],
+                         font=(self.app.cn_font, 13, "bold"), anchor="w")
+        title.pack(side="left")
+        close = tk.Label(header, text="×", bg=c["panel"], fg=c["fg_dim"],
+                         font=(self.app.cn_font, 13), padx=8, cursor="hand2")
+        close.pack(side="right")
+        close.bind("<Button-1>", lambda _e: self.close_with_defaults())
+        close.bind("<Enter>", lambda _e: close.configure(fg=c["danger"]))
+        close.bind("<Leave>", lambda _e: close.configure(fg=c["fg_dim"]))
+
+        tk.Label(outer,
+                 text="先挑几个想用的功能吧：都是可选项，之后在「设置 → 功能模块」里随时能改。",
                  bg=c["panel"], fg=c["fg_dim"], font=(self.app.cn_font, 9),
-                 anchor="w", justify="left", wraplength=420).pack(fill="x", pady=(6, 0))
-        header.bind("<ButtonPress-1>", self._start_drag)
-        header.bind("<B1-Motion>", self._do_drag)
-        header.bind("<ButtonRelease-1>", lambda _e: _release_grab(self.win))
+                 anchor="w", justify="left", wraplength=460).pack(
+                     side="top", fill="x", padx=18)
 
-        listwrap = tk.Frame(outer, bg=c["panel_alt"])
-        listwrap.pack(fill="both", expand=True, padx=18, pady=10)
+        for w in (header, title):
+            w.bind("<ButtonPress-1>", self._start_drag)
+            w.bind("<B1-Motion>", self._do_drag)
+            w.bind("<ButtonRelease-1>", lambda _e: _release_grab(self.win))
 
-        mods = self.cfg.get("modules") or {}
-        for idx, mod in enumerate(MODULES):
-            var = tk.BooleanVar(value=bool(mods.get(mod["key"], mod.get("default", False))))
-            self.vars[mod["key"]] = var
-            row = tk.Frame(listwrap, bg=c["panel_alt"])
-            row.pack(fill="x", padx=10, pady=1)
-            tk.Checkbutton(
-                row, text=mod["label"], variable=var, bg=c["panel_alt"], fg=c["fg"],
-                selectcolor=c["panel"], activebackground=c["panel_alt"],
-                activeforeground=c["fg"], font=(self.app.cn_font, 9),
-                highlightthickness=0, bd=0, anchor="w", cursor="hand2", width=18,
-            ).pack(side="left")
-            tk.Label(row, text=mod["hint"], bg=c["panel_alt"], fg=c["fg_dim"],
-                     font=(self.app.cn_font, 8), anchor="w").pack(side="left", padx=(4, 0))
-
+        # 先 pack 底部两块，再 pack 会 expand 的列表区：顺序反了的话
+        # 列表会把按钮顶出窗口边界（Tk 不裁剪子控件，只会让它看不见）。
         footer = tk.Frame(outer, bg=c["panel"])
-        footer.pack(fill="x", padx=18, pady=(0, 16))
+        footer.pack(side="bottom", fill="x", padx=18, pady=(4, 14))
         tk.Label(footer, text="不选也能用：拼音、朗读、复制、选中双击浮窗都是基础功能。",
                  bg=c["panel"], fg=c["fg_dim"], font=(self.app.cn_font, 8),
-                 anchor="w").pack(fill="x")
-
+                 anchor="w").pack(side="top", fill="x")
         btns = tk.Frame(footer, bg=c["panel"])
-        btns.pack(fill="x", pady=(8, 0))
+        btns.pack(side="top", fill="x", pady=(8, 0))
         start = tk.Label(btns, text="开始使用", bg=c["accent"], fg=c["accent_fg"],
                          font=(self.app.cn_font, 10), padx=18, pady=6, cursor="hand2")
         start.pack(side="right")
@@ -2015,10 +2084,57 @@ class FirstRunWindow:
         none.pack(side="right", padx=8)
         none.bind("<Button-1>", lambda _e: self._set_all(False))
 
+        pager = tk.Frame(outer, bg=c["panel"])
+        pager.pack(side="bottom", fill="x", padx=18)
+        self.btn_prev = tk.Label(pager, text="‹ 上一页", bg=c["panel_alt"], fg=c["fg"],
+                                 font=(self.app.cn_font, 9), padx=10, pady=4, cursor="hand2")
+        self.btn_prev.pack(side="left")
+        self.btn_prev.bind("<Button-1>", lambda _e: self._go(-1))
+        self.btn_next = tk.Label(pager, text="下一页 ›", bg=c["panel_alt"], fg=c["fg"],
+                                 font=(self.app.cn_font, 9), padx=10, pady=4, cursor="hand2")
+        self.btn_next.pack(side="right")
+        self.btn_next.bind("<Button-1>", lambda _e: self._go(1))
+        self.lbl_page = tk.Label(pager, text="", bg=c["panel"], fg=c["fg_dim"],
+                                 font=(self.app.cn_font, 9))
+        self.lbl_page.pack(side="left", expand=True)
+
+        self.pagewrap = tk.Frame(outer, bg=c["panel_alt"])
+        self.pagewrap.pack(side="top", fill="both", expand=True, padx=18, pady=10)
+        self._render_page()
+
+    def _render_page(self) -> None:
+        c = self.colors
+        for w in self.pagewrap.winfo_children():
+            w.destroy()
+        for mod in self.pages[self.page]:
+            row = tk.Frame(self.pagewrap, bg=c["panel_alt"])
+            row.pack(fill="x", padx=10, pady=2)
+            tk.Checkbutton(
+                row, text=mod["label"], variable=self.vars[mod["key"]],
+                bg=c["panel_alt"], fg=c["fg"], selectcolor=c["panel"],
+                activebackground=c["panel_alt"], activeforeground=c["fg"],
+                font=(self.app.cn_font, 9), highlightthickness=0, bd=0,
+                anchor="w", cursor="hand2", width=18,
+            ).pack(side="left")
+            tk.Label(row, text=mod["hint"], bg=c["panel_alt"], fg=c["fg_dim"],
+                     font=(self.app.cn_font, 8), anchor="w").pack(side="left", padx=(4, 0))
+
+        total = len(self.pages)
+        self.lbl_page.configure(text=f"第 {self.page + 1} / {total} 页")
+        self.btn_prev.configure(fg=c["fg"] if self.page > 0 else c["fg_dim"])
+        self.btn_next.configure(fg=c["fg"] if self.page < total - 1 else c["fg_dim"])
+
+    def _go(self, delta: int) -> None:
+        page = self.page + delta
+        if 0 <= page < len(self.pages):
+            self.page = page
+            self._render_page()
+
     def _set_all(self, value: bool) -> None:
         for var in self.vars.values():
             var.set(value)
 
+    # ---------------- 结束 ----------------
     def confirm(self) -> None:
         if not self.alive:
             return
@@ -2027,6 +2143,20 @@ class FirstRunWindow:
         save_config(self.cfg)
         self.close()
         self.app.rebuild_ui()
+
+    def close_with_defaults(self) -> None:
+        """× 或 Esc：不保存勾选，回到默认配置并关闭引导。"""
+        if not self.alive:
+            return
+        self.cfg["modules"] = default_modules()
+        self.cfg["first_run"] = False
+        save_config(self.cfg)
+        self.close()
+        self.app.rebuild_ui()
+        try:
+            self.app.show()
+        except Exception:
+            pass
 
     def _start_drag(self, event) -> None:
         self._drag = (event.x_root - self.win.winfo_x(),
@@ -2040,7 +2170,7 @@ class FirstRunWindow:
         self.win.geometry(f"+{event.x_root - self._drag[0]}+{event.y_root - self._drag[1]}")
 
     def _center(self) -> None:
-        w, h = 480, 560
+        w, h = self.WIDTH, self.HEIGHT
         self.win.update_idletasks()
         x = (self.win.winfo_screenwidth() - w) // 2
         y = max(60, (self.win.winfo_screenheight() - h) // 2 - 40)

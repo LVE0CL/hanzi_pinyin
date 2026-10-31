@@ -3,7 +3,7 @@
 > 一个常驻 Windows 托盘的汉字工具：**写一个字 / 选中一段字，立刻看到带声调的拼音**，还能朗读、复制、点单字反复听。
 > 本地运行、不联网、不上传任何文字。MIT 许可。
 
-![版本](https://img.shields.io/badge/version-1.2.1-brightgreen)
+![版本](https://img.shields.io/badge/version-1.2.2-brightgreen)
 ![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![许可证](https://img.shields.io/badge/license-MIT-green)
 ![Python](https://img.shields.io/badge/python-3.10%2B-yellow)
@@ -382,6 +382,7 @@ docs/                      # 截图
 - [x] v1.1.0 八向缩放 · 选中双击迷你浮窗 · 嗓音与标调 · 多音字点击
 - [x] v1.2.0 齿轮图标 · 5 套主题 + 背景覆盖 · 图钉置顶 · 快捷键重构 · 首启引导与模块框架 · 手写板 · 非中文过滤 · 点浮窗外关闭
 - [x] v1.2.1 修复双击 exe 后主窗口不出现 · 提供单文件版和绿色版 zip
+- [x] v1.2.2 修复首启引导页按钮不可见 · 输入框点不进去 · 双击 Shift 选不中文字
 - [ ] v1.3.x 把 15 个模块逐个落地（先做笔画动画、生词本 SRS、声调图）
 - [ ] 离线手写模型（CASIA-HWDB 训练）替换系统面板依赖
 - [ ] 设置界面内直接预览主题色板
