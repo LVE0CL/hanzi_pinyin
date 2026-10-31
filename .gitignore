@@ -18,8 +18,9 @@ config.json
 .DS_Store
 Thumbs.db
 
-# 本地调试脚本
-_*.py
+# 本地调试脚本（只忽略根目录的 _xxx.py）
+# 注意别写成 `_*.py`：那会连 hpp/__init__.py 一起忽略掉，包初始化文件就进不了仓库
+/_*.py
 
 # PyInstaller 生成的 spec
 *.spec
